@@ -331,6 +331,8 @@
     const transDate = window.transactionDate || today;
     const isEditing = !!window.editingTransactionId;
     const editingTxn = isEditing ? documents.find(d => d.__backendId === window.editingTransactionId) : null;
+    const prefilledCustomer = selectedCustomer ? customers.find(c => c.__backendId === selectedCustomer) : null;
+    const prefilledCustomerName = prefilledCustomer ? prefilledCustomer.customer_name : '';
     container.innerHTML = `
       <div class="mb-6">
         ${isEditing ? `<div class="bg-emerald-50 border-l-4 border-emerald-600 p-4 mb-4 rounded-r"><p class="font-semibold text-emerald-900">Editing Transaction</p><p class="text-sm text-emerald-800 mt-1">${editingTxn.transaction_number} - Changes will update the existing transaction</p></div>` : ''}
@@ -359,6 +361,15 @@
             <h3 class="font-semibold text-slate-700 mb-3">Cart Items</h3>
             <div id="cartItems">${renderCartItems()}</div>
           </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-slate-700 mb-3">Summary</h3>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between"><span class="text-slate-500">Subtotal</span><span class="font-medium">${formatCurrency(subtotal)}</span></div>
+              <div class="flex justify-between items-center"><span class="text-slate-500">Tax (%) <span class="text-xs text-slate-400">default 6%</span></span><input type="number" id="taxPercent" value="${taxPercent}" min="0" max="100" step="0.01" class="w-20 border rounded px-2 py-1 text-sm text-right" onchange="updateTaxPercent(this.value)" /></div>
+              <div class="flex justify-between"><span class="text-slate-500">Tax (RM)</span><span class="font-medium">${formatCurrency(tax)}</span></div>
+              <div class="border-t pt-2 flex justify-between"><span class="font-bold text-slate-800">Total</span><span class="font-bold text-lg text-blue-600">${formatCurrency(total)}</span></div>
+            </div>
+          </div>
         </div>
         <div class="space-y-4">
           <div class="bg-white rounded-xl shadow-sm border p-5">
@@ -368,7 +379,7 @@
           <div class="bg-white rounded-xl shadow-sm border p-5">
             <h3 class="font-semibold text-slate-700 mb-3">Customer</h3>
             <div class="relative">
-              <input type="text" id="customerSearch" placeholder="Search customer..." class="w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" oninput="filterCustomerDropdown(this.value)" onfocus="showCustomerDropdown()" />
+              <input type="text" id="customerSearch" placeholder="Search customer..." value="${prefilledCustomerName.replace(/"/g,'&quot;')}" class="w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" oninput="filterCustomerDropdown(this.value)" onfocus="showCustomerDropdown()" />
               <div id="customerDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto z-30">
                 <div class="p-2">
                   <div class="p-2 cursor-pointer hover:bg-blue-50 rounded" onclick="selectCustomerFromDropdown('', 'Walk-in Customer')"><p class="text-sm font-medium text-slate-700">Walk-in Customer</p></div>
@@ -376,15 +387,6 @@
                 </div>
               </div>
               <select id="customerSelect" class="hidden" onchange="selectCustomer(this.value)"><option value="">Walk-in Customer</option>${custOptions}</select>
-            </div>
-          </div>
-          <div class="bg-white rounded-xl shadow-sm border p-5">
-            <h3 class="font-semibold text-slate-700 mb-3">Summary</h3>
-            <div class="space-y-2 text-sm">
-              <div class="flex justify-between"><span class="text-slate-500">Subtotal</span><span class="font-medium">${formatCurrency(subtotal)}</span></div>
-              <div class="flex justify-between items-center"><span class="text-slate-500">Tax (%) <span class="text-xs text-slate-400">default 6%</span></span><input type="number" id="taxPercent" value="${taxPercent}" min="0" max="100" step="0.01" class="w-20 border rounded px-2 py-1 text-sm text-right" onchange="updateTaxPercent(this.value)" /></div>
-              <div class="flex justify-between"><span class="text-slate-500">Tax (RM)</span><span class="font-medium">${formatCurrency(tax)}</span></div>
-              <div class="border-t pt-2 flex justify-between"><span class="font-bold text-slate-800">Total</span><span class="font-bold text-lg text-blue-600">${formatCurrency(total)}</span></div>
             </div>
           </div>
           <div class="bg-white rounded-xl shadow-sm border p-5">
@@ -623,7 +625,7 @@
         return `<div class="bg-white rounded-xl shadow-sm border p-4 hover:shadow-md transition"><div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div class="flex-1 cursor-pointer" onclick="viewTransactionDocuments('${txn.__backendId}')"><p class="font-semibold text-slate-800 text-sm">${txn.transaction_number}</p><p class="text-xs text-slate-500">${cust ? cust.customer_name : 'Walk-in'} &middot; ${date}</p><div class="mt-2 h-2 bg-slate-100 rounded-full overflow-hidden">${renderTransactionProgressBar(txn)}</div></div>
           <div class="flex items-center gap-2 flex-wrap"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-${color}-100 text-${color}-700">${statusLabel}</span><span class="font-bold text-slate-800 text-sm">${formatCurrency(txn.transaction_total)}</span>
-          <button onclick="editTransactionItems('${txn.__backendId}')" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="edit-3" class="w-3 h-3"></i>Edit Items</button>
+          <button onclick="editTransactionItems('${txn.__backendId}')" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="edit-3" class="w-3 h-3"></i>Edit</button>
           <button onclick="viewTransactionDocuments('${txn.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="file-text" class="w-3 h-3"></i>View</button></div></div></div>`;
       }).join('')}</div>`}`;
   }
