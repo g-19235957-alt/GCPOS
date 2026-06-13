@@ -1,0 +1,1104 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudPOS Pro (Google Sheets)</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['DM Sans','sans-serif'], display: ['Playfair Display','serif'] } } } }
+  </script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    .app-shell { height: 100%; overflow: hidden; }
+    .scrollable { overflow-y: auto; }
+    @media print { .no-print { display: none !important; } .print-only { display: block !important; } }
+    .toast-enter { animation: slideIn 0.3s ease; }
+    @keyframes slideIn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .dropdown-item:hover { background: #f0f4ff; }
+    .sidebar-item { transition: all 0.2s; }
+    .sidebar-item:hover, .sidebar-item.active { background: rgba(255,255,255,0.1); }
+    input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+    body { box-sizing: border-box; }
+  </style>
+ </head>
+ <body class="h-full bg-gray-50 font-sans">
+
+  <!-- ============ SETUP / CONNECT SCREEN ============ -->
+  <div id="setupScreen" class="hidden fixed inset-0 z-[200] bg-slate-900 text-white overflow-y-auto">
+    <div class="max-w-xl mx-auto px-6 py-12">
+      <h1 class="font-display text-3xl font-bold mb-2">Connect to Google Sheets</h1>
+      <p class="text-slate-300 mb-6 text-sm">CloudPOS Pro stores all data in your own Google Sheet. Do the one-time setup below, paste your Web App URL, and you're done. The URL is remembered on this device.</p>
+
+      <div class="bg-slate-800 rounded-xl p-5 mb-6 text-sm leading-relaxed">
+        <p class="font-semibold mb-2 text-blue-300">One-time setup steps</p>
+        <ol class="list-decimal list-inside space-y-1 text-slate-300">
+          <li>Open <span class="font-mono">sheets.google.com</span> and create a new blank sheet.</li>
+          <li>Menu: <span class="font-semibold">Extensions &rarr; Apps Script</span>.</li>
+          <li>Delete the sample code, paste the script you were given, click Save.</li>
+          <li>Click <span class="font-semibold">Deploy &rarr; New deployment</span>.</li>
+          <li>Type = <span class="font-semibold">Web app</span>; Execute as = <span class="font-semibold">Me</span>; Access = <span class="font-semibold">Anyone</span>.</li>
+          <li>Click Deploy, allow access when asked.</li>
+          <li>Copy the <span class="font-semibold">Web app URL</span> (ends in <span class="font-mono">/exec</span>) and paste it below.</li>
+        </ol>
+      </div>
+
+      <label class="block text-sm font-semibold mb-2">Web App URL</label>
+      <input id="setupUrlInput" type="url" placeholder="https://script.google.com/macros/s/..../exec"
+        class="w-full rounded-lg px-4 py-3 text-slate-900 text-sm mb-3" />
+      <div id="setupError" class="hidden text-red-300 text-sm mb-3"></div>
+      <button onclick="connectSheets()" id="connectBtn"
+        class="w-full bg-blue-600 hover:bg-blue-700 rounded-lg py-3 font-semibold transition">Connect &amp; Load Data</button>
+
+      <p class="text-slate-400 text-xs mt-4">Already connected on another device? Just paste the same URL here.</p>
+    </div>
+  </div>
+
+  <!-- ============ MAIN APP ============ -->
+  <div id="app" class="app-shell flex flex-col md:flex-row w-full hidden">
+   <header class="md:hidden bg-slate-900 text-white p-4 flex items-center justify-between no-print">
+    <button onclick="toggleMobileMenu()" class="p-2"><i data-lucide="menu" class="w-5 h-5"></i></button>
+    <h1 class="font-display text-lg font-bold">CloudPOS Pro</h1>
+    <div class="w-9"></div>
+   </header>
+   <nav id="sidebar" class="hidden md:flex flex-col w-64 bg-slate-900 text-white flex-shrink-0 no-print" style="height:100%">
+    <div class="p-5 border-b border-slate-700">
+     <h1 class="font-display text-xl font-bold">CloudPOS Pro</h1>
+     <p class="text-slate-400 text-xs mt-1">Synced to Google Sheets</p>
+    </div>
+    <div class="flex-1 py-4 scrollable">
+     <div class="px-3 mb-2 text-xs text-slate-500 uppercase tracking-wider">Sales</div>
+     <button onclick="navigate('pos')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="pos"><i data-lucide="shopping-cart" class="w-4 h-4"></i>New Transaction</button>
+     <button onclick="navigate('documents')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="documents"><i data-lucide="file-text" class="w-4 h-4"></i>Transactions</button>
+     <div class="px-3 mt-4 mb-2 text-xs text-slate-500 uppercase tracking-wider">Management</div>
+     <button onclick="navigate('products')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="products"><i data-lucide="package" class="w-4 h-4"></i>Stock / Products</button>
+     <button onclick="navigate('customers')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="customers"><i data-lucide="users" class="w-4 h-4"></i>Customers</button>
+     <div class="px-3 mt-4 mb-2 text-xs text-slate-500 uppercase tracking-wider">Reports</div>
+     <button onclick="navigate('reports')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="reports"><i data-lucide="bar-chart-3" class="w-4 h-4"></i>Customer Transactions</button>
+     <div class="px-3 mt-4 mb-2 text-xs text-slate-500 uppercase tracking-wider">Settings</div>
+     <button onclick="navigate('company')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="company"><i data-lucide="building" class="w-4 h-4"></i>Company Profile</button>
+     <button onclick="forceRefresh()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="refresh-cw" class="w-4 h-4"></i>Refresh from Sheet</button>
+     <button onclick="disconnectSheets()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left text-slate-400"><i data-lucide="log-out" class="w-4 h-4"></i>Change Sheet</button>
+    </div>
+    <div class="p-4 border-t border-slate-700 text-xs text-slate-500"><i data-lucide="cloud" class="w-3 h-3 inline"></i> Saved in Google Sheets</div>
+   </nav>
+   <div id="mobileMenuOverlay" class="hidden fixed inset-0 z-50 md:hidden no-print">
+    <div class="absolute inset-0 bg-black/50" onclick="toggleMobileMenu()"></div>
+    <div class="absolute left-0 top-0 bottom-0 w-64 bg-slate-900 text-white flex flex-col">
+     <div class="p-5 border-b border-slate-700 flex items-center justify-between">
+      <h1 class="font-display text-lg font-bold">CloudPOS Pro</h1><button onclick="toggleMobileMenu()" class="p-1"><i data-lucide="x" class="w-5 h-5"></i></button>
+     </div>
+     <div class="flex-1 py-4 scrollable">
+      <button onclick="navigate('pos');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="shopping-cart" class="w-4 h-4"></i>New Transaction</button>
+      <button onclick="navigate('documents');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="file-text" class="w-4 h-4"></i>Transactions</button>
+      <button onclick="navigate('products');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="package" class="w-4 h-4"></i>Stock / Products</button>
+      <button onclick="navigate('customers');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="users" class="w-4 h-4"></i>Customers</button>
+      <button onclick="navigate('reports');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="bar-chart-3" class="w-4 h-4"></i>Customer Transactions</button>
+      <button onclick="navigate('company');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="building" class="w-4 h-4"></i>Company Profile</button>
+      <button onclick="forceRefresh();toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="refresh-cw" class="w-4 h-4"></i>Refresh from Sheet</button>
+     </div>
+    </div>
+   </div>
+   <main class="flex-1 scrollable" style="height:100%">
+    <div id="content" class="p-4 md:p-8 max-w-6xl mx-auto"></div>
+   </main>
+  </div>
+  <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2"></div>
+
+  <script>
+  /* ===== GOOGLE SHEETS STORAGE ADAPTER (replaces dataSdk) ===== */
+  const SHEETS_URL_KEY = 'cloudpos_sheets_url';
+  window.sheetsStore = {
+    url: null, handler: null, cache: [],
+    getUrl() { return this.url || localStorage.getItem(SHEETS_URL_KEY) || null; },
+    setUrl(u) { this.url = u; localStorage.setItem(SHEETS_URL_KEY, u); },
+    async init(handler) {
+      this.handler = handler; this.url = this.getUrl();
+      if (!this.url) return { isOk: false, needsSetup: true };
+      const ok = await this.refresh();
+      return { isOk: ok };
+    },
+    async refresh() {
+      try {
+        const res = await fetch(this.getUrl(), { method: 'GET' });
+        const json = await res.json();
+        if (json.ok) {
+          this.cache = json.data || [];
+          if (this.handler && this.handler.onDataChanged) this.handler.onDataChanged(this.cache);
+          return true;
+        }
+      } catch (e) { console.error('refresh error', e); }
+      return false;
+    },
+    async _post(payload) {
+      const res = await fetch(this.getUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      return res.json();
+    },
+    async create(record) {
+      try { const j = await this._post({ action:'create', record }); if (j.ok){ await this.refresh(); return {isOk:true, record:j.record}; } return {isOk:false}; }
+      catch(e){ console.error(e); return {isOk:false}; }
+    },
+    async update(record) {
+      try { const j = await this._post({ action:'update', record }); if (j.ok){ await this.refresh(); return {isOk:true, record:j.record}; } return {isOk:false}; }
+      catch(e){ console.error(e); return {isOk:false}; }
+    },
+    async delete(record) {
+      try { const j = await this._post({ action:'delete', id: record.__backendId }); if (j.ok){ await this.refresh(); return {isOk:true}; } return {isOk:false}; }
+      catch(e){ console.error(e); return {isOk:false}; }
+    }
+  };
+  window.dataSdk = window.sheetsStore;
+
+  /* ===== SETUP SCREEN LOGIC ===== */
+  function showSetup() {
+    document.getElementById('setupScreen').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+  }
+  function showApp() {
+    document.getElementById('setupScreen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+  }
+  async function connectSheets() {
+    const input = document.getElementById('setupUrlInput');
+    const errBox = document.getElementById('setupError');
+    const btn = document.getElementById('connectBtn');
+    const url = (input.value || '').trim();
+    errBox.classList.add('hidden');
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) {
+      errBox.textContent = 'That does not look like a valid Web App URL. It should start with https://script.google.com/macros/s/ and end with /exec';
+      errBox.classList.remove('hidden');
+      return;
+    }
+    btn.disabled = true; btn.textContent = 'Connecting...';
+    window.sheetsStore.setUrl(url);
+    const ok = await window.sheetsStore.refresh();
+    btn.disabled = false; btn.textContent = 'Connect & Load Data';
+    if (ok) { showApp(); navigate('pos'); showToast('Connected to Google Sheets'); }
+    else {
+      errBox.textContent = 'Could not reach the sheet. Check the URL, make sure access is set to "Anyone", and that the deployment is active.';
+      errBox.classList.remove('hidden');
+    }
+  }
+  function disconnectSheets() {
+    localStorage.removeItem(SHEETS_URL_KEY);
+    window.sheetsStore.url = null;
+    showSetup();
+  }
+  async function forceRefresh() {
+    const ok = await window.sheetsStore.refresh();
+    showToast(ok ? 'Refreshed from Google Sheets' : 'Refresh failed', ok ? 'success' : 'error');
+  }
+
+  /* ===== APP STATE ===== */
+  let allData = [], products = [], customers = [], documents = [], companyInfo = null;
+  let currentPage = 'pos', cart = [], selectedCustomer = null;
+  let editingProduct = null, editingCustomer = null, currentRecordCount = 0;
+  let viewingTransaction = null, generatingDocType = null;
+  let reportSortBy = 'transaction_number', reportSortOrder = 'desc';
+  let productSortBy = 'name', productSortOrder = 'asc', productSearchQuery = '';
+  let selectedProductCategory = null, quickAddMode = false;
+  let viewingProduct = null, viewingCustomerForReport = null, isPublicCatalogueView = false;
+  let deletingProductId = null;
+
+  window.currentTaxPercent = 6;
+  window.editingTransactionId = null;
+  window.transactionDate = null;
+
+  const dataHandler = {
+    onDataChanged(data) {
+      allData = data;
+      currentRecordCount = data.length;
+      products = data.filter(d => d.type === 'product');
+      customers = data.filter(d => d.type === 'customer');
+      documents = data.filter(d => d.type === 'transaction');
+      companyInfo = data.find(d => d.type === 'company') || null;
+      renderCurrentPage();
+    }
+  };
+
+  (async () => {
+    const r = await window.dataSdk.init(dataHandler);
+    if (r.isOk) { showApp(); navigate('pos'); }
+    else { showSetup(); }
+  })();
+
+  /* ===== NAV / UTIL ===== */
+  function navigate(page) {
+    currentPage = page; isPublicCatalogueView = false;
+    document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === page));
+    renderCurrentPage();
+  }
+  function viewPublicCatalogue() { isPublicCatalogueView = true; renderCurrentPage(); }
+  function toggleMobileMenu() { document.getElementById('mobileMenuOverlay').classList.toggle('hidden'); }
+  function toggleQuickAddMode() {
+    quickAddMode = !quickAddMode;
+    const btn = document.getElementById('quickModeBtn'), dropdown = document.getElementById('productDropdown'), search = document.getElementById('productSearch');
+    if (quickAddMode) {
+      btn.classList.add('text-emerald-600','bg-emerald-50'); btn.classList.remove('text-blue-600');
+      if (dropdown) dropdown.classList.add('hidden');
+      if (search) search.placeholder = 'Quick Add: Type product name and qty (e.g., "Laptop x2")';
+    } else {
+      btn.classList.remove('text-emerald-600','bg-emerald-50'); btn.classList.add('text-blue-600');
+      if (search) search.placeholder = 'Search products...';
+    }
+  }
+  function renderCurrentPage() {
+    const c = document.getElementById('content');
+    if (!c) return;
+    if (isPublicCatalogueView) { renderPublicCatalogue(c); }
+    else {
+      switch(currentPage) {
+        case 'pos': renderPOS(c); break;
+        case 'documents': renderDocuments(c); break;
+        case 'view-docs': renderDocumentSelector(c); break;
+        case 'view-doc': renderDocView(c); break;
+        case 'products': renderProducts(c); break;
+        case 'product-spec': renderProductSpecification(c); break;
+        case 'customers': renderCustomers(c); break;
+        case 'reports': renderReports(c); break;
+        case 'customer-transactions': renderCustomerTransactions(c); break;
+        case 'company': renderCompany(c); break;
+        default: renderPOS(c);
+      }
+    }
+    lucide.createIcons();
+  }
+  function showToast(msg, type='success') {
+    const t = document.createElement('div');
+    t.className = `toast-enter px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${type === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'}`;
+    t.textContent = msg;
+    document.getElementById('toastContainer').appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+  }
+  function formatCurrency(n) { return new Intl.NumberFormat('ms-MY', { style:'currency', currency:'MYR' }).format(n || 0); }
+  function roundToNearest5Cents(amount) {
+    const lastDigit = Math.round(amount * 100) % 10;
+    if (lastDigit <= 5) return Math.floor(amount * 20) / 20;
+    return Math.ceil(amount * 20) / 20;
+  }
+  function formatDate(d) { return new Date(d).toLocaleDateString('en-MY', { year:'numeric', month:'long', day:'numeric' }); }
+  function getDeliveryMethodLabel(method) {
+    const methods = { walk_in:'Walk-in', hand_cod:'By Hand / COD', shipping:'Shipping', digital_download:'Digital Download' };
+    return methods[method] || 'Not specified';
+  }
+  function getCompany() { return companyInfo || { company_name:'Your Company', company_address:'', company_phone:'', company_email:'', company_reg:'', company_logo:'' }; }
+  function generateAutoSKU() {
+    const existingSkus = products.map(p => p.sku || '').filter(s => s.startsWith('GC'));
+    const numbers = existingSkus.map(s => parseInt(s.replace('GC','')) || 0);
+    const nextNum = Math.max(...numbers, 0) + 1;
+    return `GC${String(nextNum).padStart(5,'0')}`;
+  }
+  function generateTransactionNumber() {
+    const existing = documents.filter(d => d.type === 'transaction');
+    const num = String(existing.length + 1).padStart(5,'0');
+    const year = new Date().getFullYear();
+    return `TXN-${year}-${num}`;
+  }
+
+  /* ===== POS ===== */
+  function renderPOS(container) {
+    const custOptions = customers.map(c => `<option value="${c.__backendId}">${c.customer_name}${c.customer_company ? ' - ' + c.customer_company : ''}</option>`).join('');
+    const subtotal = cart.reduce((s,i) => s + i.qty * i.price, 0);
+    const taxPercent = window.currentTaxPercent || 0;
+    const tax = roundToNearest5Cents(subtotal * taxPercent / 100);
+    const total = roundToNearest5Cents(subtotal + tax);
+    const today = new Date().toISOString().split('T')[0];
+    const transDate = window.transactionDate || today;
+    const isEditing = !!window.editingTransactionId;
+    const editingTxn = isEditing ? documents.find(d => d.__backendId === window.editingTransactionId) : null;
+    container.innerHTML = `
+      <div class="mb-6">
+        ${isEditing ? `<div class="bg-emerald-50 border-l-4 border-emerald-600 p-4 mb-4 rounded-r"><p class="font-semibold text-emerald-900">Editing Transaction</p><p class="text-sm text-emerald-800 mt-1">${editingTxn.transaction_number} - Changes will update the existing transaction</p></div>` : ''}
+        <h2 class="text-2xl font-bold text-slate-800">${isEditing ? 'Edit Transaction Items' : 'New Transaction'}</h2>
+        <p class="text-slate-500 text-sm mt-1">${isEditing ? 'Modify items, quantities, and pricing' : 'Create and save transactions'}</p>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2 space-y-4">
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-semibold text-slate-700">Add Items</h3>
+              <div class="flex gap-2">
+                <button onclick="toggleQuickAddMode()" class="text-blue-600 hover:text-blue-800 text-xs font-semibold flex items-center gap-1" id="quickModeBtn"><i data-lucide="zap" class="w-3 h-3"></i>Quick Add</button>
+                <button onclick="showQuickAddProduct()" class="text-emerald-600 hover:text-emerald-800 text-xs font-semibold flex items-center gap-1"><i data-lucide="plus" class="w-3 h-3"></i>New Product</button>
+              </div>
+            </div>
+            <div id="quickAddArea"></div>
+            <div class="flex flex-col sm:flex-row gap-3">
+              <div class="flex-1 relative">
+                <input type="search" id="productSearch" placeholder="Search products..." class="w-full border rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" oninput="filterProducts(this.value)" onfocus="showProductDropdown()" />
+                <div id="productDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto z-30"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-slate-700 mb-3">Cart Items</h3>
+            <div id="cartItems">${renderCartItems()}</div>
+          </div>
+        </div>
+        <div class="space-y-4">
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-slate-700 mb-3">Transaction Date</h3>
+            <input type="date" id="transDate" value="${transDate}" class="w-full border rounded-lg px-3 py-2.5 text-sm" onchange="updateTransactionDate(this.value)" />
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-slate-700 mb-3">Customer</h3>
+            <div class="relative">
+              <input type="text" id="customerSearch" placeholder="Search customer..." class="w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" oninput="filterCustomerDropdown(this.value)" onfocus="showCustomerDropdown()" />
+              <div id="customerDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto z-30">
+                <div class="p-2">
+                  <div class="p-2 cursor-pointer hover:bg-blue-50 rounded" onclick="selectCustomerFromDropdown('', 'Walk-in Customer')"><p class="text-sm font-medium text-slate-700">Walk-in Customer</p></div>
+                  ${customers.map(c => `<div class="p-2 cursor-pointer hover:bg-blue-50 rounded" onclick="selectCustomerFromDropdown('${c.__backendId}', '${(c.customer_name||'').replace(/'/g,"\\'")}')"><p class="text-sm font-medium text-slate-700">${c.customer_name}</p>${c.customer_company ? `<p class="text-xs text-slate-500">${c.customer_company}</p>`:''}</div>`).join('')}
+                </div>
+              </div>
+              <select id="customerSelect" class="hidden" onchange="selectCustomer(this.value)"><option value="">Walk-in Customer</option>${custOptions}</select>
+            </div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-slate-700 mb-3">Summary</h3>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between"><span class="text-slate-500">Subtotal</span><span class="font-medium">${formatCurrency(subtotal)}</span></div>
+              <div class="flex justify-between items-center"><span class="text-slate-500">Tax (%) <span class="text-xs text-slate-400">default 6%</span></span><input type="number" id="taxPercent" value="${taxPercent}" min="0" max="100" step="0.01" class="w-20 border rounded px-2 py-1 text-sm text-right" onchange="updateTaxPercent(this.value)" /></div>
+              <div class="flex justify-between"><span class="text-slate-500">Tax (RM)</span><span class="font-medium">${formatCurrency(tax)}</span></div>
+              <div class="border-t pt-2 flex justify-between"><span class="font-bold text-slate-800">Total</span><span class="font-bold text-lg text-blue-600">${formatCurrency(total)}</span></div>
+            </div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-slate-700 mb-3">Payment Method</h3>
+            <div class="space-y-2">
+              <label class="flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:bg-blue-50"><input type="radio" name="payment" value="cash" ${(!window.editingPaymentMethod || window.editingPaymentMethod==='cash') ? 'checked' : ''} class="text-blue-600"><span class="text-sm">Cash</span></label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:bg-blue-50"><input type="radio" name="payment" value="lpo" ${window.editingPaymentMethod==='lpo' ? 'checked' : ''} class="text-blue-600"><span class="text-sm">LPO</span></label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:bg-blue-50"><input type="radio" name="payment" value="qr_banking" ${window.editingPaymentMethod==='qr_banking' ? 'checked' : ''} class="text-blue-600"><span class="text-sm">Online Banking QR</span></label>
+            </div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-slate-700 mb-3">Delivery Method</h3>
+            <select id="deliveryMethod" class="w-full border rounded-lg px-3 py-2.5 text-sm">
+              <option value="walk_in" ${(!window.editingDeliveryMethod||window.editingDeliveryMethod==='walk_in') ? 'selected':''}>Walk-in</option>
+              <option value="hand_cod" ${window.editingDeliveryMethod==='hand_cod' ? 'selected':''}>By Hand / COD</option>
+              <option value="shipping" ${window.editingDeliveryMethod==='shipping' ? 'selected':''}>Shipping</option>
+              <option value="digital_download" ${window.editingDeliveryMethod==='digital_download' ? 'selected':''}>Digital Download</option>
+            </select>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-slate-700 mb-3">Notes</h3>
+            <textarea id="transNotes" placeholder="Notes (optional)" class="w-full border rounded-lg px-3 py-2 text-sm mb-3 resize-none" rows="2">${window.editingNotes || ''}</textarea>
+            <div class="space-y-2">
+              <button onclick="saveTransaction(event)" class="w-full ${isEditing ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded-lg py-2.5 text-sm font-semibold transition">${isEditing ? 'Update Transaction' : 'Save Transaction'}</button>
+              ${isEditing ? `<button onclick="cancelEditTransaction()" class="w-full bg-slate-300 hover:bg-slate-400 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition">Cancel Editing</button>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mt-8"><h3 class="text-xl font-bold text-slate-800 mb-4">Recent Transactions</h3>${renderTransactionList()}</div>
+    `;
+    if (selectedCustomer) { const sel = document.getElementById('customerSelect'); if (sel) sel.value = selectedCustomer; }
+  }
+  function updateTransactionDate(date) { window.transactionDate = date; }
+  function updateTaxPercent(val) { window.currentTaxPercent = parseFloat(val) || 0; renderCurrentPage(); }
+  function renderCartItems() {
+    if (cart.length === 0) return '<p class="text-slate-400 text-sm text-center py-6">No items added yet</p>';
+    return `<div class="space-y-2">${cart.map((item,i) => `
+      <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+        <div class="flex-1 min-w-0"><p class="text-sm font-medium text-slate-800 truncate">${item.name}</p><p class="text-xs text-slate-500">${item.sku || ''}</p></div>
+        <input type="number" value="${item.qty}" min="1" class="w-14 border rounded px-2 py-1 text-sm text-center" onchange="updateCartQty(${i}, this.value)" />
+        <input type="number" value="${item.price}" min="0" step="0.01" class="w-20 border rounded px-2 py-1 text-sm text-right" onchange="updateCartPrice(${i}, this.value)" />
+        <span class="text-sm font-semibold text-slate-700 w-20 text-right">${formatCurrency(item.qty * item.price)}</span>
+        <button onclick="removeFromCart(${i})" class="text-red-400 hover:text-red-600 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+      </div>`).join('')}</div>`;
+  }
+  function renderTransactionList() {
+    const sorted = [...documents].sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0,10);
+    if (sorted.length === 0) return '<p class="text-slate-400 text-sm">No transactions yet</p>';
+    const statusColors = { draft:'gray', quotation:'amber', invoice:'blue', delivery_order:'emerald', receipt:'purple' };
+    return `<div class="space-y-2">${sorted.map(t => {
+      const color = statusColors[t.transaction_status] || 'gray';
+      const cust = customers.find(c => c.__backendId === t.transaction_customer_id);
+      const date = new Date(t.transaction_date).toLocaleDateString('en-MY');
+      const isEditing = window.editingTransactionId === t.__backendId;
+      return `<div class="bg-white rounded-lg border p-3 flex flex-col sm:flex-row sm:items-center gap-3 hover:shadow-md transition ${isEditing ? 'ring-2 ring-blue-500':''}">
+        <div class="flex-1"><p class="font-semibold text-slate-800 text-sm">${t.transaction_number}</p><p class="text-xs text-slate-500">${cust ? cust.customer_name : 'Walk-in'} &middot; ${date}</p>${isEditing ? '<p class="text-xs text-blue-600 font-semibold mt-1">Editing...</p>':''}</div>
+        <div class="flex items-center gap-2">
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-${color}-100 text-${color}-700">${t.transaction_status}</span>
+          <span class="font-bold text-slate-800">${formatCurrency(t.transaction_total)}</span>
+          ${!isEditing ? `<button onclick="editTransaction('${t.__backendId}')" class="text-blue-600 hover:text-blue-800 p-1" title="Edit"><i data-lucide="edit" class="w-4 h-4"></i></button><button onclick="viewTransactionDocuments('${t.__backendId}')" class="text-emerald-600 hover:text-emerald-800 p-1" title="View Documents"><i data-lucide="file-text" class="w-4 h-4"></i></button>` : `<button onclick="cancelEditTransaction()" class="text-red-600 hover:text-red-800 p-1 text-xs" title="Cancel">Cancel</button>`}
+        </div></div>`;
+    }).join('')}</div>`;
+  }
+  function cancelEditTransaction() {
+    window.editingTransactionId = null; cart = []; selectedCustomer = null;
+    window.currentTaxPercent = 6; window.transactionDate = null;
+    window.editingPaymentMethod = null; window.editingDeliveryMethod = null; window.editingNotes = null;
+    renderCurrentPage();
+  }
+  function showProductDropdown() { filterProducts(document.getElementById('productSearch')?.value || ''); }
+  function filterProducts(query) {
+    if (quickAddMode) { handleQuickAddQuery(query); return; }
+    const dd = document.getElementById('productDropdown'); if (!dd) return;
+    const q = query.toLowerCase();
+    const filtered = products.filter(p => p.name.toLowerCase().includes(q) || (p.sku||'').toLowerCase().includes(q) || (p.category||'').toLowerCase().includes(q)).slice(0,20);
+    dd.innerHTML = filtered.length === 0 ? '<div class="p-3 text-sm text-slate-400">No products found</div>'
+      : filtered.map(p => `<div class="dropdown-item px-4 py-2.5 cursor-pointer border-b last:border-0" onclick="addToCart('${p.__backendId}')"><div class="font-medium text-sm text-slate-800">${p.name}</div><div class="text-xs text-slate-500">${p.sku || ''} &middot; ${formatCurrency(p.price)} &middot; Stock: ${p.quantity || 0}</div></div>`).join('');
+    dd.classList.remove('hidden');
+    setTimeout(() => { document.addEventListener('click', function hideDD(e){ if (!dd.contains(e.target) && e.target.id !== 'productSearch'){ dd.classList.add('hidden'); document.removeEventListener('click', hideDD);} }); }, 100);
+  }
+  function handleQuickAddQuery(query) {
+    const trimmed = query.trim(); if (!trimmed) return;
+    const match = trimmed.match(/^(.+?)\s+x\s*(\d+)$/i);
+    let searchTerm = match ? match[1].trim() : trimmed;
+    let quantity = match ? parseInt(match[2]) : 1;
+    const filtered = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()) || (p.sku||'').toLowerCase().includes(searchTerm.toLowerCase())).slice(0,10);
+    const dd = document.getElementById('productDropdown'); if (!dd) return;
+    dd.innerHTML = filtered.length === 0 ? `<div class="p-3 text-sm text-slate-400">No products found. <button onclick="showQuickAddProduct()" class="text-blue-600 hover:underline font-semibold">Create new?</button></div>`
+      : filtered.map(p => `<div class="dropdown-item px-4 py-2.5 cursor-pointer border-b last:border-0 hover:bg-emerald-50" onclick="quickAddToCart('${p.__backendId}', ${quantity})"><div class="font-medium text-sm text-slate-800">${p.name}</div><div class="text-xs text-slate-500">${p.sku || ''} &middot; ${formatCurrency(p.price)} &middot; Adding: ${quantity}x</div></div>`).join('');
+    dd.classList.remove('hidden');
+  }
+  function addToCart(productId) {
+    const p = products.find(pr => pr.__backendId === productId); if (!p) return;
+    const existing = cart.find(c => c.productId === productId);
+    if (existing) existing.qty++; else cart.push({ productId, name:p.name, sku:p.sku, price:p.price, qty:1 });
+    document.getElementById('productDropdown')?.classList.add('hidden');
+    document.getElementById('productSearch').value = ''; renderCurrentPage();
+  }
+  function quickAddToCart(productId, quantity) {
+    const p = products.find(pr => pr.__backendId === productId); if (!p) return;
+    const existing = cart.find(c => c.productId === productId);
+    if (existing) existing.qty += quantity; else cart.push({ productId, name:p.name, sku:p.sku, price:p.price, qty:quantity });
+    document.getElementById('productDropdown')?.classList.add('hidden');
+    document.getElementById('productSearch').value = ''; renderCurrentPage();
+  }
+  function updateCartQty(idx,val){ cart[idx].qty = Math.max(1, parseInt(val)||1); renderCurrentPage(); }
+  function updateCartPrice(idx,val){ cart[idx].price = Math.max(0, parseFloat(val)||0); renderCurrentPage(); }
+  function removeFromCart(idx){ cart.splice(idx,1); renderCurrentPage(); }
+  function selectCustomer(id){ selectedCustomer = id || null; }
+  function showCustomerDropdown(){ const dd = document.getElementById('customerDropdown'); if (dd) dd.classList.remove('hidden'); }
+  function filterCustomerDropdown(query){
+    const dd = document.getElementById('customerDropdown'); if (!dd) return;
+    const q = query.toLowerCase();
+    const filtered = [{ __backendId:'', customer_name:'Walk-in Customer' }, ...customers.filter(c => c.customer_name.toLowerCase().includes(q) || (c.customer_company && c.customer_company.toLowerCase().includes(q)) || (c.customer_email && c.customer_email.toLowerCase().includes(q)))];
+    dd.innerHTML = filtered.map(c => `<div class="p-2 cursor-pointer hover:bg-blue-50 rounded" onclick="selectCustomerFromDropdown('${c.__backendId || ''}', '${(c.customer_name||'Walk-in Customer').replace(/'/g,"\\'")}')"><p class="text-sm font-medium text-slate-700">${c.customer_name || 'Walk-in Customer'}</p>${c.customer_company ? `<p class="text-xs text-slate-500">${c.customer_company}</p>`:''}</div>`).join('');
+    dd.classList.remove('hidden');
+  }
+  function selectCustomerFromDropdown(id,name){
+    const search = document.getElementById('customerSearch'); if (search) search.value = name;
+    selectCustomer(id);
+    const dd = document.getElementById('customerDropdown'); if (dd) dd.classList.add('hidden');
+  }
+  function showQuickAddProduct(){
+    const area = document.getElementById('quickAddArea'); if (!area) return;
+    area.innerHTML = `<div class="bg-blue-50 rounded-lg border border-blue-200 p-4 mb-3"><h4 class="font-semibold text-slate-700 mb-3 text-sm">Quick Add Product</h4>
+      <form onsubmit="saveQuickProduct(event)" class="space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div><label class="text-xs text-slate-600 block mb-1 font-medium">Product Name *</label><input id="qName" required class="w-full border rounded px-3 py-2 text-sm" placeholder="e.g., Laptop"></div>
+          <div><label class="text-xs text-slate-600 block mb-1 font-medium">Price (RM) *</label><input id="qPrice" type="number" step="0.01" required class="w-full border rounded px-3 py-2 text-sm" placeholder="0.00"></div>
+          <div><label class="text-xs text-slate-600 block mb-1 font-medium">Quantity *</label><input id="qQty" type="number" value="1" min="1" class="w-full border rounded px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-slate-600 block mb-1 font-medium">Category</label><input id="qCategory" class="w-full border rounded px-3 py-2 text-sm" placeholder="Optional"></div>
+        </div>
+        <div class="flex gap-2"><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-semibold">Add &amp; Use</button><button type="button" onclick="cancelQuickAdd()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded text-sm font-medium">Cancel</button></div>
+      </form></div>`;
+  }
+  function cancelQuickAdd(){ const area = document.getElementById('quickAddArea'); if (area) area.innerHTML = ''; }
+  async function saveQuickProduct(e){
+    e.preventDefault();
+    const name = document.getElementById('qName').value;
+    const price = parseFloat(document.getElementById('qPrice').value) || 0;
+    const quantity = parseInt(document.getElementById('qQty').value) || 1;
+    const category = document.getElementById('qCategory').value;
+    const btn = e.target.querySelector('button[type="submit"]'); btn.disabled = true; btn.textContent = 'Adding...';
+    const sku = generateAutoSKU();
+    const data = { type:'product', name, sku, price, quantity, category, description:'', product_photo:'', created_at:new Date().toISOString() };
+    const result = await window.dataSdk.create(data);
+    btn.disabled = false; btn.textContent = 'Add & Use';
+    if (result.isOk) {
+      showToast('Product added and ready to use'); cancelQuickAdd();
+      const newProduct = products.find(p => p.name === name && p.sku === sku);
+      if (newProduct) {
+        const existing = cart.find(c => c.productId === newProduct.__backendId);
+        if (existing) existing.qty += quantity; else cart.push({ productId:newProduct.__backendId, name:newProduct.name, sku:newProduct.sku, price:newProduct.price, qty:quantity });
+        renderCurrentPage();
+      }
+    } else showToast('Failed to add product', 'error');
+  }
+  function parseItems(raw){
+    let itemsRaw = JSON.parse(raw || '[]');
+    return itemsRaw.map(item => {
+      if (Array.isArray(item)) {
+        const product = products.find(p => p.__backendId === item[0]);
+        return { productId:item[0], name: product ? product.name : 'Unknown Product', sku: product ? (product.sku||'') : '', qty:item[1], price:item[2] };
+      }
+      return { productId:item.productId||item.p, name:item.name||item.n||'Unknown Product', sku:item.sku||item.s||'', qty:item.qty||item.q||0, price:item.price||item.pr||0 };
+    });
+  }
+  function editTransaction(id){
+    const t = documents.find(d => d.__backendId === id); if (!t) return;
+    cart = parseItems(t.transaction_items);
+    selectedCustomer = t.transaction_customer_id || null;
+    window.currentTaxPercent = t.transaction_tax_percent || 0;
+    window.transactionDate = t.transaction_date.split('T')[0];
+    window.editingTransactionId = id;
+    window.editingPaymentMethod = t.transaction_payment_method || 'cash';
+    window.editingDeliveryMethod = t.transaction_delivery_method || 'walk_in';
+    window.editingNotes = t.transaction_notes || '';
+    window.scrollTo(0,0); renderCurrentPage();
+  }
+  async function saveTransaction(event){
+    if (cart.length === 0) { showToast('Please add items to cart', 'error'); return; }
+    const subtotal = cart.reduce((s,i) => s + i.qty * i.price, 0);
+    const taxPercent = window.currentTaxPercent || 0;
+    const tax = roundToNearest5Cents(subtotal * taxPercent / 100);
+    const total = roundToNearest5Cents(subtotal + tax);
+    const payment = document.querySelector('input[name="payment"]:checked')?.value || 'cash';
+    const delivery = document.getElementById('deliveryMethod')?.value || 'walk_in';
+    const notes = document.getElementById('transNotes')?.value || '';
+    const selectedDate = document.getElementById('transDate')?.value || new Date().toISOString().split('T')[0];
+    const transactionDate = new Date(selectedDate).toISOString();
+    const btn = event.target; btn.disabled = true; btn.textContent = window.editingTransactionId ? 'Updating...' : 'Saving...';
+    const cartItemsCompressed = cart.map(item => [item.productId, item.qty, item.price]);
+    const data = {
+      type:'transaction', transaction_type:'standard',
+      transaction_number: window.editingTransactionId ? documents.find(d => d.__backendId === window.editingTransactionId).transaction_number : generateTransactionNumber(),
+      transaction_date: transactionDate, transaction_customer_id: selectedCustomer || '',
+      transaction_items: JSON.stringify(cartItemsCompressed),
+      transaction_subtotal: subtotal, transaction_tax_percent: taxPercent, transaction_tax: tax, transaction_total: total,
+      transaction_payment_method: payment, transaction_delivery_method: delivery, transaction_status: 'draft', transaction_notes: notes,
+      created_at: window.editingTransactionId ? documents.find(d => d.__backendId === window.editingTransactionId).created_at : new Date().toISOString()
+    };
+    let result;
+    if (window.editingTransactionId) {
+      const existingTxn = documents.find(d => d.__backendId === window.editingTransactionId);
+      const oldItemsRaw = JSON.parse(existingTxn.transaction_items || '[]');
+      const oldItems = oldItemsRaw.map(item => Array.isArray(item) ? { productId:item[0], qty:item[1] } : { productId:item.p||item.productId, qty:item.q||item.qty });
+      result = await window.dataSdk.update({ ...existingTxn, ...data });
+      if (result.isOk) {
+        for (const oldItem of oldItems) { const product = products.find(p => p.__backendId === oldItem.productId); if (product) await window.dataSdk.update({ ...product, quantity:(product.quantity||0)+oldItem.qty }); }
+        for (const ci of cartItemsCompressed) { const product = products.find(p => p.__backendId === ci[0]); if (product) await window.dataSdk.update({ ...product, quantity:Math.max(0,(product.quantity||0)-ci[1]) }); }
+      }
+    } else {
+      result = await window.dataSdk.create(data);
+      if (result.isOk) { for (const ci of cartItemsCompressed) { const product = products.find(p => p.__backendId === ci[0]); if (product) await window.dataSdk.update({ ...product, quantity:Math.max(0,(product.quantity||0)-ci[1]) }); } }
+    }
+    btn.disabled = false; btn.textContent = window.editingTransactionId ? 'Update Transaction' : 'Save Transaction';
+    if (result.isOk) {
+      showToast(window.editingTransactionId ? 'Transaction updated successfully' : 'Transaction saved');
+      cart = []; selectedCustomer = null; window.currentTaxPercent = 6; window.editingTransactionId = null;
+      window.transactionDate = null; window.editingPaymentMethod = null; window.editingDeliveryMethod = null; window.editingNotes = null;
+      renderCurrentPage();
+    } else showToast('Failed to save transaction', 'error');
+  }
+
+  /* ===== DOCUMENTS LIST ===== */
+  function renderDocuments(container){
+    const sorted = [...documents].sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+    const statusColors = { draft:'gray', quotation:'amber', invoice:'blue', delivery_order:'emerald', receipt:'purple' };
+    container.innerHTML = `<div class="mb-6"><h2 class="text-2xl font-bold text-slate-800">Transactions</h2><p class="text-slate-500 text-sm mt-1">${documents.length} transactions</p></div>
+      ${sorted.length === 0 ? '<div class="bg-white rounded-xl shadow-sm border p-12 text-center"><p class="text-slate-400">No transactions yet. Create one from New Transaction.</p></div>' : `<div class="space-y-3">${sorted.map(txn => {
+        const color = statusColors[txn.transaction_status] || 'gray';
+        const cust = customers.find(c => c.__backendId === txn.transaction_customer_id);
+        const date = new Date(txn.transaction_date).toLocaleDateString('en-MY');
+        const statusLabel = txn.transaction_status.charAt(0).toUpperCase() + txn.transaction_status.slice(1);
+        return `<div class="bg-white rounded-xl shadow-sm border p-4 hover:shadow-md transition"><div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex-1 cursor-pointer" onclick="viewTransactionDocuments('${txn.__backendId}')"><p class="font-semibold text-slate-800 text-sm">${txn.transaction_number}</p><p class="text-xs text-slate-500">${cust ? cust.customer_name : 'Walk-in'} &middot; ${date}</p><div class="mt-2 h-2 bg-slate-100 rounded-full overflow-hidden">${renderTransactionProgressBar(txn)}</div></div>
+          <div class="flex items-center gap-2 flex-wrap"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-${color}-100 text-${color}-700">${statusLabel}</span><span class="font-bold text-slate-800 text-sm">${formatCurrency(txn.transaction_total)}</span>
+          <button onclick="editTransactionItems('${txn.__backendId}')" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="edit-3" class="w-3 h-3"></i>Edit Items</button>
+          <button onclick="viewTransactionDocuments('${txn.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="file-text" class="w-3 h-3"></i>View</button></div></div></div>`;
+      }).join('')}</div>`}`;
+  }
+  function renderTransactionProgressBar(txn){
+    const statuses = ['draft','quotation','invoice','delivery_order','receipt'];
+    const currentIdx = statuses.indexOf(txn.transaction_status);
+    const percentage = currentIdx >= 4 ? 100 : ((currentIdx + 1) / statuses.length) * 100;
+    return `<div class="h-full ${txn.transaction_status === 'receipt' ? 'bg-emerald-600' : 'bg-blue-600'}" style="width: ${percentage}%"></div>`;
+  }
+  function editTransactionItems(id){
+    const txn = documents.find(d => d.__backendId === id); if (!txn) return;
+    cart = parseItems(txn.transaction_items);
+    selectedCustomer = txn.transaction_customer_id || null;
+    window.currentTaxPercent = txn.transaction_tax_percent || 0;
+    window.transactionDate = txn.transaction_date.split('T')[0];
+    window.editingTransactionId = id;
+    window.editingPaymentMethod = txn.transaction_payment_method || 'cash';
+    window.editingDeliveryMethod = txn.transaction_delivery_method || 'walk_in';
+    window.editingNotes = txn.transaction_notes || '';
+    currentPage = 'pos'; renderCurrentPage(); window.scrollTo(0,0);
+  }
+  function viewTransactionDocuments(id){ viewingTransaction = documents.find(d => d.__backendId === id); if (!viewingTransaction) return; currentPage = 'view-docs'; renderCurrentPage(); }
+
+  function renderDocumentSelector(container){
+    if (!viewingTransaction) { navigate('documents'); return; }
+    const txn = viewingTransaction;
+    const statuses = ['draft','quotation','invoice','delivery_order','receipt'];
+    const currentIdx = statuses.indexOf(txn.transaction_status);
+    container.innerHTML = `<div class="mb-6"><button onclick="navigate('documents')" class="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 mb-4"><i data-lucide="arrow-left" class="w-4 h-4"></i>Back to Transactions</button><h2 class="text-2xl font-bold text-slate-800">Generate Documents</h2><p class="text-slate-500 text-sm mt-1">${txn.transaction_number}</p></div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      ${currentIdx >= 0 ? `<button onclick="generateAndViewDocument('quotation')" class="bg-amber-50 rounded-xl shadow-sm border border-amber-200 p-6 hover:shadow-md transition text-left"><div class="flex items-center gap-3 mb-2"><div class="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center"><i data-lucide="file-text" class="w-5 h-5 text-amber-600"></i></div><span class="px-2 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">Quotation</span></div><h3 class="font-semibold text-slate-800">Quote for Review</h3><p class="text-xs text-slate-500 mt-1">Price quotation for customer approval</p></button>`:''}
+      ${currentIdx >= 1 ? `<button onclick="generateAndViewDocument('invoice')" class="bg-blue-50 rounded-xl shadow-sm border border-blue-200 p-6 hover:shadow-md transition text-left"><div class="flex items-center gap-3 mb-2"><div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center"><i data-lucide="file-text" class="w-5 h-5 text-blue-600"></i></div><span class="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">Invoice</span></div><h3 class="font-semibold text-slate-800">Sales Invoice</h3><p class="text-xs text-slate-500 mt-1">Official invoice for billing and records</p></button>`:''}
+      ${currentIdx >= 2 ? `<button onclick="generateAndViewDocument('delivery_order')" class="bg-emerald-50 rounded-xl shadow-sm border border-emerald-200 p-6 hover:shadow-md transition text-left"><div class="flex items-center gap-3 mb-2"><div class="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center"><i data-lucide="file-text" class="w-5 h-5 text-emerald-600"></i></div><span class="px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">Delivery Order</span></div><h3 class="font-semibold text-slate-800">Delivery Order</h3><p class="text-xs text-slate-500 mt-1">Proof of delivery and shipment</p></button>`:''}
+      ${currentIdx >= 3 ? `<button onclick="generateAndViewDocument('receipt')" class="bg-purple-50 rounded-xl shadow-sm border border-purple-200 p-6 hover:shadow-md transition text-left"><div class="flex items-center gap-3 mb-2"><div class="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center"><i data-lucide="file-text" class="w-5 h-5 text-purple-600"></i></div><span class="px-2 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">Receipt</span></div><h3 class="font-semibold text-slate-800">Payment Receipt</h3><p class="text-xs text-slate-500 mt-1">Official payment receipt</p></button>`:''}
+      </div>`;
+  }
+  function generateAndViewDocument(docType){ if (!viewingTransaction) return; generatingDocType = docType; currentPage = 'view-doc'; renderCurrentPage(); }
+
+  function renderDocView(container){
+    if (!viewingTransaction || !generatingDocType) { navigate('documents'); return; }
+    const txn = viewingTransaction;
+    const items = parseItems(txn.transaction_items);
+    const cust = customers.find(c => c.__backendId === txn.transaction_customer_id);
+    const comp = getCompany();
+    const docLabels = { quotation:'QUOTATION', invoice:'INVOICE', delivery_order:'DELIVERY ORDER', receipt:'RECEIPT' };
+    const paymentLabels = { cash:'Cash', lpo:'LPO (Local Purchase Order)', qr_banking:'Online Banking QR' };
+    const docDate = new Date(txn.transaction_date).toLocaleDateString('en-MY', { year:'numeric', month:'long', day:'numeric' });
+    const c1 = generatingDocType === 'quotation' ? '#fcd34d' : generatingDocType === 'invoice' ? '#60a5fa' : generatingDocType === 'delivery_order' ? '#34d399' : '#c084fc';
+    const c2 = generatingDocType === 'quotation' ? '#b45309' : generatingDocType === 'invoice' ? '#1e40af' : generatingDocType === 'delivery_order' ? '#047857' : '#7c3aed';
+    const c3 = generatingDocType === 'quotation' ? '#fef3c7' : generatingDocType === 'invoice' ? '#dbeafe' : generatingDocType === 'delivery_order' ? '#d1fae5' : '#ede9fe';
+    const c4 = generatingDocType === 'quotation' ? '#fcd34d' : generatingDocType === 'invoice' ? '#93c5fd' : generatingDocType === 'delivery_order' ? '#86efac' : '#ddd6fe';
+    container.innerHTML = `
+      <div class="mb-4 no-print"><button onclick="currentPage='view-docs'; renderCurrentPage()" class="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 mb-4"><i data-lucide="arrow-left" class="w-4 h-4"></i>Back</button>
+        <div class="flex gap-2 flex-wrap">
+          <button onclick="printDocument()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><i data-lucide="printer" class="w-4 h-4"></i>Print</button>
+          <button onclick="downloadPDF()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><i data-lucide="download" class="w-4 h-4"></i>Save PDF</button>
+          ${generatingDocType !== 'quotation' ? `<button onclick="changeDocType('quotation')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">Quotation</button>`:''}
+          ${generatingDocType === 'quotation' ? `<button onclick="changeDocType('invoice')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">Convert to Invoice</button>`:''}
+          ${(generatingDocType === 'invoice' || generatingDocType === 'quotation') ? `<button onclick="changeDocType('delivery_order')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">Convert to DO</button>`:''}
+          ${generatingDocType !== 'receipt' ? `<button onclick="changeDocType('receipt')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">Convert to Receipt</button>`:''}
+          ${generatingDocType === 'receipt' && viewingTransaction.transaction_status !== 'receipt' ? `<button onclick="markCompleted()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Mark Completed</button>`:''}
+        </div></div>
+      <div class="bg-white rounded-xl shadow-lg border-4 p-6 md:p-10 max-w-4xl mx-auto" id="printableDoc" style="border-color:${c1}">
+        <div class="flex items-start justify-between gap-6 mb-8 pb-6" style="border-bottom:3px solid ${c1};">
+          <div style="flex:1; min-width:0;">
+            ${comp.company_logo ? `<img src="${comp.company_logo}" alt="Logo" style="width:40px;height:40px;object-fit:contain;margin-bottom:8px;display:block;" onerror="this.style.display='none'">`:''}
+            <h2 class="text-lg font-bold text-slate-900">${comp.company_name || 'Your Company'}</h2>
+            <p style="font-size:9px;margin:4px 0 0 0;" class="text-slate-500 whitespace-pre-line">${comp.company_address || ''}</p>
+            ${comp.company_phone ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">Tel: ${comp.company_phone}</p>`:''}
+            ${comp.company_email ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">${comp.company_email}</p>`:''}
+            ${comp.company_reg ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">Reg: ${comp.company_reg}</p>`:''}
+          </div>
+          <div class="text-right" style="flex:0 0 auto;white-space:nowrap;">
+            <h1 class="text-4xl font-bold" style="color:${c2};margin:0 0 8px 0;line-height:1.2;">${docLabels[generatingDocType] || 'DOCUMENT'}</h1>
+            <p class="text-sm font-mono text-slate-600" style="margin:0 0 2px 0;">${txn.transaction_number}</p>
+            <p class="text-sm text-slate-500" style="margin:0;">Date: ${docDate}</p>
+          </div>
+        </div>
+        ${cust ? `<div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Bill To</p><div style="border-left:4px solid ${c1}" class="pl-4"><p class="font-semibold text-slate-800">${cust.customer_name}</p>${cust.customer_company ? `<p class="text-sm text-slate-600">${cust.customer_company}</p>`:''}${cust.customer_address ? `<p class="text-sm text-slate-500">${cust.customer_address}</p>`:''}${cust.customer_email ? `<p class="text-sm text-slate-500">${cust.customer_email}</p>`:''}${cust.customer_phone ? `<p class="text-sm text-slate-500">${cust.customer_phone}</p>`:''}</div></div>`:''}
+        ${generatingDocType === 'quotation' ? `<div class="mb-6 p-3 rounded-lg bg-amber-50 border border-amber-200"><p class="text-sm italic text-slate-600">We are pleased to give our best rates</p></div>`:''}
+        <div class="mb-6 p-3 rounded-lg" style="background-color:${c3};border:1px solid ${c4}">
+          <p class="text-xs text-slate-600"><span class="font-semibold">Payment Method:</span> ${paymentLabels[txn.transaction_payment_method] || txn.transaction_payment_method}</p>
+          <p class="text-xs text-slate-600 mt-2"><span class="font-semibold">Delivery Method:</span> ${getDeliveryMethodLabel(txn.transaction_delivery_method)}</p>
+          ${generatingDocType === 'receipt' ? `<p class="text-xs italic text-slate-600 mt-3">We hereby confirm that the company has received the cheque with the following details:</p><div class="mt-2 space-y-1 text-xs"><div class="flex gap-2"><span class="font-semibold">CHEQUE NUMBER:</span><span class="border-b border-slate-400" style="flex:1;min-width:200px;"></span></div><div class="flex gap-2"><span class="font-semibold">CHECK AMOUNT:</span><span class="border-b border-slate-400" style="flex:1;min-width:200px;"></span></div><div class="flex gap-2"><span class="font-semibold">DATE RECEIVED:</span><span class="border-b border-slate-400" style="flex:1;min-width:200px;"></span></div></div>`:''}
+        </div>
+        <div class="overflow-x-auto mb-8"><table class="w-full" style="font-size:10px;">
+          <thead><tr style="background-color:${c3};border-bottom:2px solid ${c4}"><th class="text-left py-3 px-4 font-bold text-slate-700">#</th><th class="text-left py-3 px-4 font-bold text-slate-700">SKU</th><th class="text-left py-3 px-4 font-bold text-slate-700">Description</th><th class="text-center py-3 px-4 font-bold text-slate-700">Qty</th><th class="text-right py-3 px-4 font-bold text-slate-700">Unit Price</th><th class="text-right py-3 px-4 font-bold text-slate-700">Amount</th></tr></thead>
+          <tbody>${items.map((item,i) => `<tr class="border-b border-slate-200 hover:bg-slate-50"><td class="py-3 px-4 text-slate-600">${i+1}</td><td class="py-3 px-4 font-mono text-xs text-slate-600">${item.sku || '-'}</td><td class="py-3 px-4"><p class="font-medium text-slate-800">${item.name}</p></td><td class="py-3 px-4 text-center text-slate-700">${item.qty}</td><td class="py-3 px-4 text-right text-slate-700">${formatCurrency(item.price)}</td><td class="py-3 px-4 text-right font-semibold text-slate-800">${formatCurrency(item.qty * item.price)}</td></tr>`).join('')}</tbody>
+        </table></div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:32px;"><div style="width:280px;background-color:#f8fafc;padding:12px;border-radius:6px;border:1px solid #cbd5e1;font-size:11px;">
+          <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:#475569;">Subtotal</span><span style="font-weight:500;">${formatCurrency(txn.transaction_subtotal)}</span></div>
+          ${txn.transaction_tax_percent > 0 ? `<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:#475569;">Tax (${txn.transaction_tax_percent}%)</span><span style="font-weight:500;">${formatCurrency(txn.transaction_tax)}</span></div>`:''}
+          <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700;border-top:2px solid #1e293b;padding-top:6px;margin-top:8px;"><span>Total</span><span style="color:${c2}">${formatCurrency(txn.transaction_total)}</span></div>
+        </div></div>
+        ${txn.transaction_notes ? `<div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1">Notes</p><p class="text-sm text-slate-600">${txn.transaction_notes}</p></div>`:''}
+        ${generatingDocType === 'invoice' ? `<div class="border-t pt-6 mt-8 mb-8"><p class="font-semibold text-slate-700 mb-2" style="font-size:6px;">Terms and Conditions</p><ol class="text-slate-600 space-y-1 list-decimal list-inside" style="font-size:6px;line-height:1.3;"><li>Any complains regarding this bill should be lodged within seven (7) days from the date hereof.</li><li>All payment is made to ${comp.company_name || 'the company'} either by cash or cheque. Receipt will issued after this payment is settled.</li><li>All payment by cheques must be crossed and made in favour of ${comp.company_name || 'the company'}.</li></ol></div>`:''}
+        ${generatingDocType === 'quotation' ? `<div class="border-t pt-6 mt-8 mb-8"><div class="mb-6 p-3 rounded-lg bg-slate-50 border border-slate-200"><p class="font-semibold text-slate-700 mb-2" style="font-size:6px;">Terms and Conditions</p><ol class="text-slate-600 space-y-1 list-decimal list-inside" style="font-size:6px;line-height:1.3;"><li>Customer will be billed after indicating acceptance of this quote</li><li>Payment will be due prior to delivery of service and goods</li><li>Please sign and return this price quote to the address above</li></ol></div><div class="mt-6 pt-4 border-t"><p class="text-xs font-semibold text-slate-700 mb-4">Customer Acceptance (sign below):</p><div class="grid grid-cols-2 gap-6 text-xs"><div><div class="border-b border-slate-400" style="height:35px;margin-bottom:8px;"></div><p class="text-slate-600 font-medium">Signature</p></div><div><div class="border-b border-slate-400" style="height:35px;margin-bottom:8px;"></div><p class="text-slate-600 font-medium">Name</p></div></div></div></div>` : generatingDocType === 'delivery_order' ? `<div class="border-t pt-6 mt-8 mb-8"><p class="text-sm font-semibold text-slate-800 mb-4">Delivery Acknowledgment</p><p class="text-xs text-slate-600 mb-4 leading-relaxed">I hereby acknowledge receipt of the goods in good condition and correct quantities as listed on this delivery order.</p><div class="space-y-3 text-xs"><div class="grid grid-cols-3 gap-4"><div><p class="text-slate-500 mb-1">Signature</p><div class="border-b border-slate-400" style="height:40px;"></div></div><div><p class="text-slate-500 mb-1">Date</p><div class="border-b border-slate-400" style="height:40px;"></div></div><div><p class="text-slate-500 mb-1">Name of Recipient</p><div class="border-b border-slate-400" style="height:40px;"></div></div></div><div class="grid grid-cols-2 gap-4"><div><p class="text-slate-500 mb-1">I/C Number</p><div class="border-b border-slate-400" style="height:30px;"></div></div><div><p class="text-slate-500 mb-1">Job / Position</p><div class="border-b border-slate-400" style="height:30px;"></div></div></div></div></div>`:''}
+        <div class="border-t pt-6 mt-8 space-y-2 text-center"><p class="text-xs text-slate-500 italic">This is a computer generated document. No signature required.</p><p class="text-xs text-slate-400">Thank you for your business!</p><p class="text-xs text-slate-400">${comp.company_name || ''} ${comp.company_reg ? '&middot; Reg: ' + comp.company_reg : ''}</p></div>
+      </div>`;
+  }
+  function printDocument(){
+    const element = document.getElementById('printableDoc'); if (!element) return;
+    const styles = `<style>*{margin:0;padding:0;box-sizing:border-box;}html,body{width:100%;height:100%;}body{font-family:Arial,sans-serif;padding:20px;background:white;}table{width:100%;border-collapse:collapse;margin:20px 0;}th,td{border:1px solid #ddd;padding:10px;text-align:left;}th{background-color:#f5f5f5;font-weight:bold;}@media print{body{padding:0;}.no-print{display:none !important;}}</style>`;
+    const w = window.open('', 'PRINT', 'height=600,width=800');
+    w.document.write('<!DOCTYPE html><html><head>' + styles + '</head><body>' + element.innerHTML + '</body></html>');
+    w.document.close(); w.focus(); setTimeout(() => { w.print(); w.close(); }, 500);
+  }
+  function downloadPDF(){
+    const element = document.getElementById('printableDoc'); if (!element) return;
+    const styles = `<style>*{margin:0;padding:0;box-sizing:border-box;}@page{size:A4;margin:10mm;}body{width:100%;font-family:'DM Sans',Arial,sans-serif;background:white;font-size:14px;}h1,h2,h3{font-family:'Playfair Display',serif;}h2{font-size:18px;font-weight:bold;}h1{font-size:36px;font-weight:bold;}p{line-height:1.5;}table{width:100%;border-collapse:collapse;margin:12px 0;}th{background-color:#f3f4f6;font-weight:600;padding:10px;text-align:left;border:1px solid #d1d5db;font-size:11px;}td{padding:10px;border:1px solid #e5e7eb;font-size:10px;}.border-t{border-top:1px solid #e5e7eb;}.grid{display:grid;}.grid-cols-2{grid-template-columns:repeat(2,1fr);}.grid-cols-3{grid-template-columns:repeat(3,1fr);}.gap-4{gap:16px;}.gap-6{gap:20px;}.text-center{text-align:center;}.text-right{text-align:right;}.font-semibold{font-weight:600;}.font-bold{font-weight:700;}.italic{font-style:italic;}.uppercase{text-transform:uppercase;}.flex{display:flex;}.justify-between{justify-content:space-between;}.whitespace-pre-line{white-space:pre-line;}ol{margin-left:16px;}li{font-size:9px;margin-bottom:2px;}.text-slate-400{color:#cbd5e1;}.text-slate-500{color:#64748b;}.text-slate-600{color:#475569;}.text-slate-700{color:#334155;}.text-slate-800{color:#1e293b;}.text-slate-900{color:#0f172a;}.text-xs{font-size:9px;}.text-sm{font-size:11px;}.text-4xl{font-size:36px;}.mb-6{margin-bottom:12px;}.mb-8{margin-bottom:16px;}.mt-8{margin-top:16px;}.pt-6{padding-top:10px;}.pl-4{padding-left:10px;}.p-3{padding:8px;}.rounded-lg{border-radius:6px;}</style>`;
+    const w = window.open('', 'PDF', 'height=900,width=1100');
+    if (!w) { showToast('Please enable pop-ups to download PDF', 'error'); return; }
+    w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Document</title>' + styles + '</head><body>' + element.innerHTML + '</body></html>');
+    w.document.close(); w.focus(); setTimeout(() => { if (w) w.print(); }, 1500);
+  }
+  async function changeDocType(newType){
+    if (!viewingTransaction) return;
+    const newStatus = { quotation:'quotation', invoice:'invoice', delivery_order:'delivery_order', receipt:'receipt' }[newType] || 'draft';
+    const updated = { ...viewingTransaction, transaction_status:newStatus };
+    const result = await window.dataSdk.update(updated);
+    if (result.isOk) { viewingTransaction = updated; generatingDocType = newType; renderCurrentPage(); }
+    else showToast('Failed to update status', 'error');
+  }
+  async function markCompleted(){
+    if (!viewingTransaction) return;
+    const updated = { ...viewingTransaction, transaction_status:'receipt' };
+    const result = await window.dataSdk.update(updated);
+    if (result.isOk) { showToast('Transaction marked as completed'); viewingTransaction = null; generatingDocType = null; navigate('documents'); }
+    else showToast('Failed to mark completed', 'error');
+  }
+
+  /* ===== CUSTOMER TRANSACTIONS ===== */
+  function viewCustomerTransactions(customerId){ viewingCustomerForReport = customers.find(c => c.__backendId === customerId); if (!viewingCustomerForReport) return; currentPage = 'customer-transactions'; renderCurrentPage(); }
+  function renderCustomerTransactions(container){
+    if (!viewingCustomerForReport) { navigate('reports'); return; }
+    const cust = viewingCustomerForReport;
+    const custTransactions = documents.filter(d => d.transaction_customer_id === cust.__backendId);
+    const statusColors = { draft:'gray', quotation:'amber', invoice:'blue', delivery_order:'emerald', receipt:'purple' };
+    container.innerHTML = `<div class="mb-6"><button onclick="navigate('reports')" class="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 mb-4"><i data-lucide="arrow-left" class="w-4 h-4"></i>Back to Report</button><h2 class="text-2xl font-bold text-slate-800">Customer Transaction History</h2><div class="mt-2 p-4 bg-blue-50 rounded-lg border border-blue-200"><p class="font-semibold text-slate-800">${cust.customer_name}</p>${cust.customer_company ? `<p class="text-sm text-slate-600">${cust.customer_company}</p>`:''}${cust.customer_email ? `<p class="text-sm text-slate-600">${cust.customer_email}</p>`:''}${cust.customer_phone ? `<p class="text-sm text-slate-600">${cust.customer_phone}</p>`:''}${cust.customer_address ? `<p class="text-sm text-slate-600">${cust.customer_address}</p>`:''}</div><p class="text-slate-500 text-sm mt-3">${custTransactions.length} transactions</p></div>
+      ${custTransactions.length === 0 ? '<div class="bg-white rounded-xl shadow-sm border p-12 text-center"><p class="text-slate-400">No transactions for this customer.</p></div>' : `<div class="space-y-3">${custTransactions.map(txn => {
+        const color = statusColors[txn.transaction_status] || 'gray';
+        const date = new Date(txn.transaction_date).toLocaleDateString('en-MY', { year:'numeric', month:'long', day:'numeric' });
+        const statusLabel = txn.transaction_status.charAt(0).toUpperCase() + txn.transaction_status.slice(1).replace('_',' ');
+        return `<div class="bg-white rounded-xl shadow-sm border p-4 hover:shadow-md transition"><div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4"><div class="flex-1"><p class="font-semibold text-slate-800">${txn.transaction_number}</p><p class="text-sm text-slate-500">${date} &middot; ${formatCurrency(txn.transaction_total)}</p><div class="mt-2 h-2 bg-slate-100 rounded-full overflow-hidden">${renderTransactionProgressBar(txn)}</div></div><div class="flex items-center gap-2"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-${color}-100 text-${color}-700">${statusLabel}</span><button onclick="viewAndReprintTransaction('${txn.__backendId}')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2"><i data-lucide="file-text" class="w-4 h-4"></i>View &amp; Print</button></div></div></div>`;
+      }).join('')}</div>`}`;
+    lucide.createIcons();
+  }
+  function viewAndReprintTransaction(transactionId){ viewingTransaction = documents.find(d => d.__backendId === transactionId); if (!viewingTransaction) return; generatingDocType = viewingTransaction.transaction_status || 'invoice'; currentPage = 'view-doc'; renderCurrentPage(); }
+
+  /* ===== PRODUCTS ===== */
+  function renderProducts(container){
+    container.innerHTML = `<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"><div><h2 class="text-2xl font-bold text-slate-800">Stock Management</h2><p class="text-slate-500 text-sm mt-1">${products.length} products</p></div><div class="flex gap-2 flex-wrap"><button onclick="exportProductsExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2"><i data-lucide="download" class="w-4 h-4"></i>Export Excel</button><button onclick="document.getElementById('importExcelInput').click()" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2"><i data-lucide="upload" class="w-4 h-4"></i>Import Excel</button><button onclick="showProductForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2"><i data-lucide="plus" class="w-4 h-4"></i>Add Product</button></div></div>
+      <input type="file" id="importExcelInput" accept=".xlsx,.xls,.csv" class="hidden" onchange="importProductsExcel(event)" />
+      <div id="importStatusArea"></div>
+      <div id="productFormArea"></div>
+      <div class="mb-4 flex gap-2"><div class="flex-1 relative"><i data-lucide="search" class="w-5 h-5 absolute left-3 top-2.5 text-slate-400"></i><input type="text" placeholder="Search by product name, SKU, or category..." class="w-full border rounded-lg px-10 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" oninput="updateProductSearch(this.value)" value="${productSearchQuery}"></div></div>
+      ${products.length === 0 ? '<div class="bg-white rounded-xl shadow-sm border p-12 text-center"><p class="text-slate-400">No products yet. Add your first product above.</p></div>' : `<div class="bg-white rounded-xl shadow-sm border overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-50 border-b">
+        <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortProducts('name')"><div class="flex items-center gap-2">Product <span class="text-xs">${productSortBy === 'name' ? (productSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortProducts('sku')"><div class="flex items-center gap-2">SKU <span class="text-xs">${productSortBy === 'sku' ? (productSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortProducts('category')"><div class="flex items-center gap-2">Category <span class="text-xs">${productSortBy === 'category' ? (productSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-right py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortProducts('price')"><div class="flex items-center justify-end gap-2">Price <span class="text-xs">${productSortBy === 'price' ? (productSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-right py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortProducts('quantity')"><div class="flex items-center justify-end gap-2">Stock <span class="text-xs">${productSortBy === 'quantity' ? (productSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-center py-3 px-4 font-semibold text-slate-600">Actions</th></tr></thead><tbody>${renderProductTableRows()}</tbody></table></div></div>`}`;
+    lucide.createIcons();
+  }
+
+  /* ===== EXCEL EXPORT ===== */
+  function exportProductsExcel(){
+    if (typeof XLSX === 'undefined') { showToast('Excel library not loaded yet, try again', 'error'); return; }
+    const rows = products.map(p => ({
+      SKU: p.sku || '',
+      Name: p.name || '',
+      Category: p.category || '',
+      Price: p.price || 0,
+      Stock: p.quantity || 0,
+      Description: p.description || '',
+      PhotoURL: p.product_photo || ''
+    }));
+    if (rows.length === 0) rows.push({ SKU:'', Name:'', Category:'', Price:0, Stock:0, Description:'', PhotoURL:'' });
+    const ws = XLSX.utils.json_to_sheet(rows, { header:['SKU','Name','Category','Price','Stock','Description','PhotoURL'] });
+    ws['!cols'] = [{wch:12},{wch:28},{wch:16},{wch:10},{wch:8},{wch:40},{wch:40}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Products');
+    const today = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `products-${today}.xlsx`);
+    showToast('Products exported to Excel');
+  }
+
+  /* ===== EXCEL IMPORT (match by SKU: update existing, create new) ===== */
+  function importProductsExcel(event){
+    const file = event.target.files[0];
+    event.target.value = ''; // allow re-selecting same file later
+    if (!file) return;
+    if (typeof XLSX === 'undefined') { showToast('Excel library not loaded yet, try again', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      let rows;
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
+      } catch (err) { showToast('Could not read that file', 'error'); return; }
+      if (!rows || rows.length === 0) { showToast('No rows found in the file', 'error'); return; }
+      await processImportRows(rows);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  // flexible header lookup so "SKU"/"sku", "Name"/"Product Name", "Stock"/"Qty" all work
+  function pick(row, keys){
+    const lower = {};
+    Object.keys(row).forEach(k => { lower[k.toString().trim().toLowerCase()] = row[k]; });
+    for (const key of keys) { const v = lower[key]; if (v !== undefined && v !== '') return v; }
+    return '';
+  }
+
+  async function processImportRows(rows){
+    const area = document.getElementById('importStatusArea');
+    let created = 0, updated = 0, skipped = 0, failed = 0;
+    if (area) area.innerHTML = `<div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 text-sm text-amber-800">Importing ${rows.length} rows... please wait, do not close this page.</div>`;
+
+    for (const row of rows) {
+      const name = String(pick(row, ['name','product name','product','item'])).trim();
+      const skuRaw = String(pick(row, ['sku','code'])).trim();
+      if (!name && !skuRaw) { skipped++; continue; }
+      if (!name) { skipped++; continue; } // a product needs at least a name
+
+      const priceVal = parseFloat(String(pick(row, ['price','unit price','harga'])).replace(/[^0-9.\-]/g,'')) || 0;
+      const stockVal = parseInt(String(pick(row, ['stock','qty','quantity','kuantiti'])).replace(/[^0-9\-]/g,'')) || 0;
+      const category = String(pick(row, ['category','kategori'])).trim();
+      const description = String(pick(row, ['description','desc','keterangan'])).trim();
+      const photo = String(pick(row, ['photourl','photo','image','image url','imageurl'])).trim();
+
+      // match existing by SKU
+      const existing = skuRaw ? products.find(p => (p.sku || '').toLowerCase() === skuRaw.toLowerCase()) : null;
+
+      const data = {
+        type:'product',
+        name,
+        sku: existing ? existing.sku : (skuRaw || generateAutoSKU()),
+        category, price: priceVal, quantity: stockVal,
+        description, product_photo: photo,
+        created_at: existing?.created_at || new Date().toISOString()
+      };
+
+      let result;
+      if (existing) result = await window.dataSdk.update({ ...existing, ...data });
+      else result = await window.dataSdk.create(data);
+
+      if (result && result.isOk) { existing ? updated++ : created++; }
+      else failed++;
+    }
+
+    if (area) {
+      area.innerHTML = `<div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-4 text-sm text-emerald-800 flex items-start justify-between gap-3"><div><p class="font-semibold mb-1">Import complete</p><p>${created} added &middot; ${updated} updated${skipped ? ' &middot; ' + skipped + ' skipped (no name)' : ''}${failed ? ' &middot; <span class="text-red-600 font-semibold">' + failed + ' failed</span>' : ''}</p></div><button onclick="document.getElementById('importStatusArea').innerHTML=''" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-4 h-4"></i></button></div>`;
+      lucide.createIcons();
+    }
+    showToast(`Import done: ${created} added, ${updated} updated`);
+  }
+
+  async function updateStock(productId, newQty){
+    const product = products.find(p => p.__backendId === productId); if (!product) return;
+    const qty = Math.max(0, parseInt(newQty) || 0);
+    const result = await window.dataSdk.update({ ...product, quantity:qty });
+    showToast(result.isOk ? 'Stock updated' : 'Failed to update stock', result.isOk ? 'success' : 'error');
+  }
+  function updateProductSearch(query){ productSearchQuery = query.toLowerCase(); renderCurrentPage(); }
+  function sortProducts(field){ if (productSortBy === field) productSortOrder = productSortOrder === 'asc' ? 'desc' : 'asc'; else { productSortBy = field; productSortOrder = 'asc'; } renderCurrentPage(); }
+  function renderProductTableRows(){
+    let filtered = [...products];
+    if (productSearchQuery) filtered = filtered.filter(p => p.name.toLowerCase().includes(productSearchQuery) || (p.sku||'').toLowerCase().includes(productSearchQuery) || (p.category||'').toLowerCase().includes(productSearchQuery));
+    filtered.sort((a,b) => {
+      let aVal, bVal;
+      switch(productSortBy){
+        case 'sku': aVal=(a.sku||'').toLowerCase(); bVal=(b.sku||'').toLowerCase(); break;
+        case 'category': aVal=(a.category||'').toLowerCase(); bVal=(b.category||'').toLowerCase(); break;
+        case 'price': aVal=a.price||0; bVal=b.price||0; break;
+        case 'quantity': aVal=a.quantity||0; bVal=b.quantity||0; break;
+        default: aVal=a.name.toLowerCase(); bVal=b.name.toLowerCase();
+      }
+      if (aVal < bVal) return productSortOrder === 'asc' ? -1 : 1;
+      if (aVal > bVal) return productSortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+    if (filtered.length === 0) return '<tr><td colspan="6" class="py-8 text-center text-slate-400">No products found</td></tr>';
+    return filtered.map(p => `<tr class="border-b hover:bg-slate-50"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewProductSpecification('${p.__backendId}')">${p.name}</td><td class="py-3 px-4 text-slate-500 font-mono text-xs">${p.sku || '-'}</td><td class="py-3 px-4 text-slate-500">${p.category || '-'}</td><td class="py-3 px-4 text-right font-medium">${formatCurrency(p.price)}</td><td class="py-3 px-4 text-right"><input type="number" class="w-16 border rounded px-2 py-1 text-right text-sm" value="${p.quantity || 0}" onchange="updateStock('${p.__backendId}', this.value)" /></td><td class="py-3 px-4 text-center"><button onclick="editProduct('${p.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteProduct('${p.__backendId}')" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ml-2"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></td></tr>`).join('');
+  }
+  function showProductForm(product){
+    editingProduct = product || null; const p = product || {};
+    const area = document.getElementById('productFormArea'); if (!area) return;
+    area.innerHTML = `<div class="bg-white rounded-xl shadow-sm border p-5 mb-4"><h3 class="font-semibold text-slate-700 mb-3">${product ? 'Edit' : 'Add'} Product</h3>
+      <form onsubmit="saveProduct(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div><label class="text-xs text-slate-500 block mb-1">Name *</label><input id="pName" required class="w-full border rounded-lg px-3 py-2 text-sm" value="${p.name || ''}"></div>
+        <div><label class="text-xs text-slate-500 block mb-1">SKU <span class="text-slate-400">(auto)</span></label><input id="pSku" readonly class="w-full border rounded-lg px-3 py-2 text-sm bg-slate-50" value="${p.sku || generateAutoSKU()}"></div>
+        <div><label class="text-xs text-slate-500 block mb-1">Category</label><input id="pCategory" class="w-full border rounded-lg px-3 py-2 text-sm" value="${p.category || ''}"></div>
+        <div><label class="text-xs text-slate-500 block mb-1">Price *</label><input id="pPrice" type="number" step="0.01" required class="w-full border rounded-lg px-3 py-2 text-sm" value="${p.price || ''}"></div>
+        <div><label class="text-xs text-slate-500 block mb-1">Stock Qty</label><input id="pQty" type="number" class="w-full border rounded-lg px-3 py-2 text-sm" value="${p.quantity || 0}"></div>
+        <div><label class="text-xs text-slate-500 block mb-1">Description</label><textarea id="pDesc" class="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows="2">${p.description || ''}</textarea></div>
+        <div class="sm:col-span-2 lg:col-span-3"><label class="text-xs text-slate-500 block mb-1 font-medium">Product Photo (Optional)</label><div class="flex gap-3 items-end"><div class="flex-1"><input type="url" id="pPhoto" placeholder="https://example.com/photo.jpg" class="w-full border rounded-lg px-3 py-2.5 text-sm" value="${p.product_photo || ''}"><p class="text-xs text-slate-400 mt-1">Enter image URL (HTTPS)</p></div>${p.product_photo ? `<div class="flex-shrink-0"><img src="${p.product_photo}" alt="Product" class="h-16 w-16 object-cover rounded-lg border" onerror="this.style.display='none'"></div>`:''}</div></div>
+        <div class="sm:col-span-2 lg:col-span-3 flex gap-2 mt-2"><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold">${product ? 'Update' : 'Add'} Product</button><button type="button" onclick="cancelProductForm()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-lg text-sm font-medium">Cancel</button></div>
+      </form></div>`;
+    lucide.createIcons();
+  }
+  function cancelProductForm(){ editingProduct = null; const a = document.getElementById('productFormArea'); if (a) a.innerHTML=''; }
+  function editProduct(id){ const p = products.find(pr => pr.__backendId === id); if (p) showProductForm(p); }
+  async function saveProduct(e){
+    e.preventDefault();
+    const generatedSku = editingProduct ? editingProduct.sku : generateAutoSKU();
+    const data = { type:'product', name:document.getElementById('pName').value, sku:generatedSku, category:document.getElementById('pCategory').value, price:parseFloat(document.getElementById('pPrice').value)||0, quantity:parseInt(document.getElementById('pQty').value)||0, description:document.getElementById('pDesc').value, product_photo:document.getElementById('pPhoto').value, created_at:editingProduct?.created_at || new Date().toISOString() };
+    let result;
+    if (editingProduct) result = await window.dataSdk.update({ ...editingProduct, ...data });
+    else result = await window.dataSdk.create(data);
+    if (result.isOk) { showToast(editingProduct ? 'Product updated' : 'Product added'); editingProduct = null; }
+    else showToast('Failed to save', 'error');
+  }
+  function confirmDeleteProduct(id){
+    deletingProductId = id;
+    const row = event.target.closest('tr'); const cell = row.querySelector('td:last-child');
+    cell.innerHTML = `<span class="text-xs text-red-600 font-medium">Delete?</span><button onclick="doDeleteProduct()" class="text-xs bg-red-600 text-white px-2 py-1 rounded ml-1">Yes</button><button onclick="renderCurrentPage()" class="text-xs bg-slate-200 px-2 py-1 rounded ml-1">No</button>`;
+  }
+  async function doDeleteProduct(){ const p = products.find(pr => pr.__backendId === deletingProductId); if (!p) return; const r = await window.dataSdk.delete(p); showToast(r.isOk ? 'Product deleted' : 'Delete failed', r.isOk ? 'success' : 'error'); }
+
+  /* ===== CUSTOMERS ===== */
+  function renderCustomers(container){
+    container.innerHTML = `<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"><div><h2 class="text-2xl font-bold text-slate-800">Customer Management</h2><p class="text-slate-500 text-sm mt-1">${customers.length} customers</p></div><button onclick="showCustomerForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 w-fit"><i data-lucide="plus" class="w-4 h-4"></i>Add Customer</button></div>
+      <div id="customerFormArea"></div>
+      ${customers.length === 0 ? '<div class="bg-white rounded-xl shadow-sm border p-12 text-center"><p class="text-slate-400">No customers yet.</p></div>' : `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">${customers.map(c => {
+        const custTransactions = documents.filter(d => d.transaction_customer_id === c.__backendId);
+        const lastTxnDate = custTransactions.length > 0 ? new Date(custTransactions[custTransactions.length-1].transaction_date).toLocaleDateString('en-MY') : 'No transactions';
+        const isEditing = editingCustomer && editingCustomer.__backendId === c.__backendId;
+        return `<div class="bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition ${isEditing ? 'ring-2 ring-blue-500':''}"><div class="flex items-start justify-between mb-3"><div class="flex-1"><h4 class="font-semibold text-slate-800">${c.customer_name}</h4>${c.customer_company ? `<p class="text-sm text-blue-600">${c.customer_company}</p>`:''}${c.customer_email ? `<p class="text-xs text-slate-500 mt-1">${c.customer_email}</p>`:''}${c.customer_phone ? `<p class="text-xs text-slate-500">${c.customer_phone}</p>`:''}${c.customer_address ? `<p class="text-xs text-slate-400 mt-1">${c.customer_address}</p>`:''}<p class="text-xs text-slate-400 mt-2 italic">Last transaction: ${lastTxnDate}</p></div><div class="flex gap-2 mt-3 flex-shrink-0"><button onclick="editCustomer('${c.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteCustomer('${c.__backendId}', this)" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></div></div>${isEditing ? '<p class="text-xs text-blue-600 font-semibold">Editing...</p>':''}</div>`;
+      }).join('')}</div>`}`;
+    if (editingCustomer) showCustomerForm(editingCustomer);
+    lucide.createIcons();
+  }
+  function showCustomerForm(cust){
+    editingCustomer = cust || null; const c = cust || {};
+    const area = document.getElementById('customerFormArea'); if (!area) return;
+    area.innerHTML = `<div class="bg-white rounded-xl shadow-sm border p-5 mb-4" style="border-left:4px solid ${cust ? '#3b82f6':'#10b981'}"><h3 class="font-semibold text-slate-700 mb-3">${cust ? 'Edit Customer Details' : 'Add New Customer'}</h3>
+      <form onsubmit="saveCustomer(event)" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div><label class="text-xs text-slate-600 block mb-2 font-semibold">Full Name *</label><input id="cName" required class="w-full border rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Customer name" value="${c.customer_name || ''}"></div>
+        <div><label class="text-xs text-slate-600 block mb-2 font-semibold">Company Name</label><input id="cCompany" class="w-full border rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Company name" value="${c.customer_company || ''}"></div>
+        <div><label class="text-xs text-slate-600 block mb-2 font-semibold">Email Address</label><input id="cEmail" type="email" class="w-full border rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="customer@example.com" value="${c.customer_email || ''}"></div>
+        <div><label class="text-xs text-slate-600 block mb-2 font-semibold">Phone Number</label><input id="cPhone" class="w-full border rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="+60123456789" value="${c.customer_phone || ''}"></div>
+        <div class="sm:col-span-2"><label class="text-xs text-slate-600 block mb-2 font-semibold">Street Address</label><textarea id="cAddr" class="w-full border rounded-lg px-4 py-2.5 text-sm resize-none focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Enter complete address" rows="3">${c.customer_address || ''}</textarea></div>
+        <div class="sm:col-span-2 flex gap-2 mt-4 pt-4 border-t"><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold transition flex items-center gap-2"><i data-lucide="check" class="w-4 h-4"></i>${cust ? 'Update Customer' : 'Add Customer'}</button><button type="button" onclick="cancelCustomerForm()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-2.5 rounded-lg text-sm font-medium transition flex items-center gap-2"><i data-lucide="x" class="w-4 h-4"></i>Cancel</button></div>
+      </form></div>`;
+    lucide.createIcons();
+  }
+  function cancelCustomerForm(){ editingCustomer = null; const a = document.getElementById('customerFormArea'); if (a) a.innerHTML=''; }
+  function editCustomer(id){ const c = customers.find(cu => cu.__backendId === id); if (c) showCustomerForm(c); }
+  async function saveCustomer(e){
+    e.preventDefault();
+    const data = { type:'customer', customer_name:document.getElementById('cName').value, customer_company:document.getElementById('cCompany').value, customer_email:document.getElementById('cEmail').value, customer_phone:document.getElementById('cPhone').value, customer_address:document.getElementById('cAddr').value, created_at:editingCustomer?.created_at || new Date().toISOString() };
+    let result;
+    if (editingCustomer) result = await window.dataSdk.update({ ...editingCustomer, ...data });
+    else result = await window.dataSdk.create(data);
+    if (result.isOk) { showToast(editingCustomer ? 'Customer updated' : 'Customer added'); editingCustomer = null; }
+    else showToast('Failed to save', 'error');
+  }
+  function confirmDeleteCustomer(id, btn){
+    const actions = btn.parentElement;
+    actions.innerHTML = `<span class="text-xs text-red-600">Delete?</span><button onclick="doDeleteCustomer('${id}')" class="text-xs bg-red-600 text-white px-2 py-1 rounded ml-1">Yes</button><button onclick="renderCurrentPage()" class="text-xs bg-slate-200 px-2 py-1 rounded ml-1">No</button>`;
+  }
+  async function doDeleteCustomer(id){ const c = customers.find(cu => cu.__backendId === id); if (!c) return; const r = await window.dataSdk.delete(c); showToast(r.isOk ? 'Customer deleted' : 'Delete failed', r.isOk ? 'success' : 'error'); }
+
+  /* ===== PRODUCT SPEC ===== */
+  function viewProductSpecification(productId){ const product = products.find(p => p.__backendId === productId); if (!product) return; viewingProduct = product; currentPage = 'product-spec'; renderCurrentPage(); }
+  function renderProductSpecification(container){
+    if (!viewingProduct) { navigate('products'); return; }
+    const prod = viewingProduct; const comp = getCompany();
+    container.innerHTML = `<div class="mb-4 no-print"><button onclick="navigate('products')" class="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 mb-4"><i data-lucide="arrow-left" class="w-4 h-4"></i>Back to Products</button><div class="flex gap-2 flex-wrap"><button onclick="printProductSpec()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><i data-lucide="printer" class="w-4 h-4"></i>Print</button><button onclick="downloadProductSpecPDF()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><i data-lucide="download" class="w-4 h-4"></i>Save PDF</button></div></div>
+      <div class="bg-white rounded-xl shadow-lg border-4 p-6 md:p-10 max-w-4xl mx-auto" id="specDocument" style="border-color:#2563eb"><div class="flex items-start justify-between gap-6 mb-8 pb-6" style="border-bottom:3px solid #2563eb;"><div style="flex:1;min-width:0;">${comp.company_logo ? `<img src="${comp.company_logo}" alt="Logo" style="width:40px;height:40px;object-fit:contain;margin-bottom:8px;display:block;" onerror="this.style.display='none'">`:''}<h2 class="text-lg font-bold text-slate-900">${comp.company_name || 'Your Company'}</h2><p style="font-size:9px;margin:4px 0 0 0;" class="text-slate-500 whitespace-pre-line">${comp.company_address || ''}</p>${comp.company_phone ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">Tel: ${comp.company_phone}</p>`:''}${comp.company_email ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">${comp.company_email}</p>`:''}${comp.company_reg ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">Reg: ${comp.company_reg}</p>`:''}</div><div class="text-right" style="flex:0 0 auto;white-space:nowrap;"><h1 class="text-4xl font-bold" style="color:#1e40af;margin:0 0 8px 0;line-height:1.2;">ITEM SPECIFICATION</h1><p class="text-sm text-slate-500" style="margin:0;">Date: ${new Date().toLocaleDateString('en-MY', { year:'numeric', month:'long', day:'numeric' })}</p></div></div>
+        <div class="mb-8"><div style="display:flex;gap:24px;align-items:flex-start;margin-bottom:24px;"><div style="flex:1;min-width:0;"><div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Product Name</p><h3 class="text-3xl font-bold text-slate-900">${prod.name}</h3></div><div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">SKU</p><p class="text-lg font-mono font-bold text-slate-700">${prod.sku || 'N/A'}</p></div></div>${prod.product_photo ? `<div style="flex:0 0 auto;"><img src="${prod.product_photo}" alt="${prod.name}" style="width:300px;height:300px;object-fit:contain;border:2px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" onerror="this.style.display='none'"></div>`:''}</div>${prod.description ? `<div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Description</p><div class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap" style="background:#f8fafc;padding:12px;border-left:4px solid #2563eb;border-radius:4px;">${prod.description}</div></div>`:''}</div>
+        <div class="border-t pt-6 mt-8 space-y-2 text-center"><p class="text-xs text-slate-500 italic">This is a computer generated document. No signature required.</p><p class="text-xs text-slate-400">${comp.company_name || ''} ${comp.company_reg ? '&middot; Reg: ' + comp.company_reg : ''}</p></div></div>`;
+    lucide.createIcons();
+  }
+  function printProductSpec(){
+    const element = document.getElementById('specDocument'); if (!element) return;
+    const styles = `<style>*{margin:0;padding:0;box-sizing:border-box;}@page{size:A4;margin:10mm;}body{font-family:'DM Sans',Arial,sans-serif;background:white;font-size:14px;}h1,h2,h3{font-family:'Playfair Display',serif;}h3{font-size:28px;font-weight:bold;}h1{font-size:36px;font-weight:bold;}p{line-height:1.5;}@media print{.no-print{display:none !important;}}</style>`;
+    const w = window.open('', 'PRINT', 'height=600,width=800');
+    w.document.write('<!DOCTYPE html><html><head>' + styles + '</head><body>' + element.innerHTML + '</body></html>');
+    w.document.close(); w.focus(); setTimeout(() => { w.print(); w.close(); }, 500);
+  }
+  function downloadProductSpecPDF(){
+    const element = document.getElementById('specDocument'); if (!element) return;
+    const styles = `<style>*{margin:0;padding:0;box-sizing:border-box;}@page{size:A4;margin:10mm;}body{font-family:'DM Sans',Arial,sans-serif;background:white;font-size:14px;}h1,h2,h3{font-family:'Playfair Display',serif;}h1{font-size:36px;font-weight:bold;}h3{font-size:28px;font-weight:bold;}p{line-height:1.5;}.border-t{border-top:1px solid #e5e7eb;}.text-center{text-align:center;}.font-semibold{font-weight:600;}.font-bold{font-weight:700;}.italic{font-style:italic;}.uppercase{text-transform:uppercase;}.whitespace-pre-wrap{white-space:pre-wrap;}.text-slate-400{color:#cbd5e1;}.text-slate-500{color:#64748b;}.text-slate-700{color:#334155;}.text-slate-900{color:#0f172a;}.text-xs{font-size:9px;}.mb-6{margin-bottom:12px;}.mt-8{margin-top:16px;}.pt-6{padding-top:10px;}</style>`;
+    const w = window.open('', 'PDF', 'height=900,width=1100');
+    w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Item Specification</title>' + styles + '</head><body>' + element.innerHTML + '</body></html>');
+    w.document.close(); w.focus(); setTimeout(() => { w.print(); }, 500);
+  }
+
+  /* ===== COMPANY ===== */
+  function renderCompany(container){
+    const c = getCompany();
+    container.innerHTML = `<div class="mb-6"><h2 class="text-2xl font-bold text-slate-800">Company Profile</h2><p class="text-slate-500 text-sm mt-1">This information appears on all your documents</p></div>
+      <div class="bg-white rounded-xl shadow-sm border p-6 max-w-2xl"><form onsubmit="saveCompany(event)" class="space-y-4">
+        <div><label class="text-xs text-slate-500 block mb-1 font-medium">Company Name *</label><input id="compName" required class="w-full border rounded-lg px-4 py-2.5 text-sm" value="${c.company_name || ''}"></div>
+        <div><label class="text-xs text-slate-500 block mb-1 font-medium">Address</label><textarea id="compAddr" class="w-full border rounded-lg px-4 py-2.5 text-sm resize-none" rows="3">${c.company_address || ''}</textarea></div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label class="text-xs text-slate-500 block mb-1 font-medium">Phone</label><input id="compPhone" class="w-full border rounded-lg px-4 py-2.5 text-sm" value="${c.company_phone || ''}"></div><div><label class="text-xs text-slate-500 block mb-1 font-medium">Email</label><input id="compEmail" type="email" class="w-full border rounded-lg px-4 py-2.5 text-sm" value="${c.company_email || ''}"></div></div>
+        <div><label class="text-xs text-slate-500 block mb-1 font-medium">Registration No.</label><input id="compReg" class="w-full border rounded-lg px-4 py-2.5 text-sm" value="${c.company_reg || ''}"></div>
+        <div><label class="text-xs text-slate-500 block mb-1 font-medium">Logo URL (https://)</label><input id="compLogo" type="url" class="w-full border rounded-lg px-4 py-2.5 text-sm" value="${c.company_logo || ''}" placeholder="https://example.com/logo.png"></div>
+        ${c.company_logo ? `<div><img src="${c.company_logo}" alt="Logo preview" class="h-16 object-contain border rounded p-2" onerror="this.style.display='none'"></div>`:''}
+        <button type="submit" id="saveCompanyBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold">Save Company Profile</button>
+      </form></div>`;
+  }
+  async function saveCompany(e){
+    e.preventDefault();
+    const btn = document.getElementById('saveCompanyBtn'); btn.disabled = true; btn.textContent = 'Saving...';
+    const data = { type:'company', company_name:document.getElementById('compName').value, company_address:document.getElementById('compAddr').value, company_phone:document.getElementById('compPhone').value, company_email:document.getElementById('compEmail').value, company_reg:document.getElementById('compReg').value, company_logo:document.getElementById('compLogo').value, created_at:companyInfo?.created_at || new Date().toISOString() };
+    let result;
+    if (companyInfo) result = await window.dataSdk.update({ ...companyInfo, ...data });
+    else result = await window.dataSdk.create(data);
+    btn.disabled = false; btn.textContent = 'Save Company Profile';
+    showToast(result.isOk ? 'Company profile saved' : 'Failed to save', result.isOk ? 'success' : 'error');
+  }
+
+  /* ===== REPORTS ===== */
+  function renderReports(container){
+    container.innerHTML = `<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"><div><h2 class="text-2xl font-bold text-slate-800">Customer Transaction Report</h2><p class="text-slate-500 text-sm mt-1">View and track customer transaction history</p></div><button onclick="printReports()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 w-fit no-print"><i data-lucide="printer" class="w-4 h-4"></i>Print Report</button></div>
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden" id="reportTable"><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-50 border-b">
+        <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('customer_name')"><div class="flex items-center gap-2">Customer Name <span class="text-xs">${reportSortBy === 'customer_name' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('address')"><div class="flex items-center gap-2">Address <span class="text-xs">${reportSortBy === 'address' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('transaction_date')"><div class="flex items-center gap-2">Transaction Date <span class="text-xs">${reportSortBy === 'transaction_date' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('transaction_number')"><div class="flex items-center gap-2">Transaction Number <span class="text-xs">${reportSortBy === 'transaction_number' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('delivery_method')"><div class="flex items-center gap-2">Delivery Method <span class="text-xs">${reportSortBy === 'delivery_method' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-right py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('total_amount')"><div class="flex items-center justify-end gap-2">Total Amount (RM) <span class="text-xs">${reportSortBy === 'total_amount' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+        <th class="text-center py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('status')"><div class="flex items-center justify-center gap-2">Status <span class="text-xs">${reportSortBy === 'status' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
+      </tr></thead><tbody>${renderTransactionReportRows()}</tbody></table></div></div>`;
+    lucide.createIcons();
+  }
+  function sortReports(field){ if (reportSortBy === field) reportSortOrder = reportSortOrder === 'asc' ? 'desc' : 'asc'; else { reportSortBy = field; reportSortOrder = 'asc'; } renderCurrentPage(); }
+  function renderTransactionReportRows(){
+    if (documents.length === 0) return '<tr><td colspan="7" class="py-8 text-center text-slate-400">No transactions yet</td></tr>';
+    let sorted = [...documents];
+    sorted.sort((a,b) => {
+      let aVal, bVal;
+      switch(reportSortBy){
+        case 'customer_name': { const ca = customers.find(c => c.__backendId === a.transaction_customer_id); const cb = customers.find(c => c.__backendId === b.transaction_customer_id); aVal = ca ? ca.customer_name : 'Walk-in Customer'; bVal = cb ? cb.customer_name : 'Walk-in Customer'; break; }
+        case 'address': { const ca = customers.find(c => c.__backendId === a.transaction_customer_id); const cb = customers.find(c => c.__backendId === b.transaction_customer_id); aVal = ca ? (ca.customer_address||'') : ''; bVal = cb ? (cb.customer_address||'') : ''; break; }
+        case 'transaction_date': aVal = new Date(a.transaction_date); bVal = new Date(b.transaction_date); break;
+        case 'total_amount': aVal = a.transaction_total; bVal = b.transaction_total; break;
+        case 'status': aVal = a.transaction_status; bVal = b.transaction_status; break;
+        case 'delivery_method': aVal = a.transaction_delivery_method || ''; bVal = b.transaction_delivery_method || ''; break;
+        default: aVal = a.transaction_number; bVal = b.transaction_number;
+      }
+      if (aVal < bVal) return reportSortOrder === 'asc' ? -1 : 1;
+      if (aVal > bVal) return reportSortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+    const statusColors = { draft:'gray', quotation:'amber', invoice:'blue', delivery_order:'emerald', receipt:'purple' };
+    return sorted.map(txn => {
+      const cust = customers.find(c => c.__backendId === txn.transaction_customer_id);
+      const custName = cust ? cust.customer_name : 'Walk-in Customer';
+      const custAddress = cust ? (cust.customer_address || '-') : '-';
+      const date = new Date(txn.transaction_date).toLocaleDateString('en-MY', { year:'numeric', month:'short', day:'numeric' });
+      const color = statusColors[txn.transaction_status] || 'gray';
+      const statusLabel = txn.transaction_status.charAt(0).toUpperCase() + txn.transaction_status.slice(1).replace('_',' ');
+      const deliveryLabel = getDeliveryMethodLabel(txn.transaction_delivery_method);
+      return `<tr class="border-b hover:bg-slate-50 transition"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewCustomerTransactions('${txn.transaction_customer_id}')">${custName}</td><td class="py-3 px-4 text-slate-600 text-xs">${custAddress}</td><td class="py-3 px-4 text-slate-600">${date}</td><td class="py-3 px-4 font-mono text-xs text-slate-600">${txn.transaction_number}</td><td class="py-3 px-4 text-sm text-slate-700">${deliveryLabel}</td><td class="py-3 px-4 text-right font-bold text-slate-800">${formatCurrency(txn.transaction_total)}</td><td class="py-3 px-4 text-center"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-${color}-100 text-${color}-700">${statusLabel}</span></td></tr>`;
+    }).join('');
+  }
+  function printReports(){
+    const element = document.getElementById('reportTable'); if (!element) return;
+    const styles = `<style>*{margin:0;padding:0;box-sizing:border-box;}@page{size:A4 landscape;margin:10mm;}body{font-family:Arial,sans-serif;padding:20px;background:white;}h1{font-size:24px;font-weight:bold;margin-bottom:20px;text-align:center;}p{font-size:12px;text-align:center;margin-bottom:10px;color:#666;}table{width:100%;border-collapse:collapse;margin-top:20px;}th{background-color:#f3f4f6;font-weight:bold;padding:12px;text-align:left;border:1px solid #d1d5db;font-size:11px;}td{padding:10px 12px;border:1px solid #e5e7eb;font-size:10px;}tr:nth-child(even){background-color:#f9fafb;}@media print{.no-print{display:none !important;}}</style>`;
+    const w = window.open('', 'PRINT', 'height=600,width=900');
+    const comp = getCompany();
+    const today = new Date().toLocaleDateString('en-MY', { year:'numeric', month:'long', day:'numeric' });
+    w.document.write('<!DOCTYPE html><html><head>' + styles + '</head><body>');
+    w.document.write(`<h1>${comp.company_name || 'Company Report'}</h1><p>Customer Transaction Report - Generated: ${today}</p>`);
+    w.document.write(element.innerHTML + '</body></html>');
+    w.document.close(); w.focus(); setTimeout(() => { w.print(); w.close(); }, 500);
+  }
+
+  /* ===== PUBLIC CATALOGUE ===== */
+  function renderPublicCatalogue(container){
+    const comp = getCompany();
+    const categories = [...new Set(products.map(p => p.category || 'Uncategorized').filter(c => c))];
+    container.innerHTML = `<div class="min-h-full bg-gradient-to-br from-slate-50 to-slate-100"><div class="bg-gradient-to-r from-slate-900 to-slate-800 text-white py-8"><div class="max-w-6xl mx-auto px-4"><div class="flex items-start justify-between gap-4"><div class="flex-1">${comp.company_logo ? `<img src="${comp.company_logo}" alt="Logo" class="h-12 object-contain mb-3" onerror="this.style.display='none'">`:''}<h1 class="text-4xl font-bold mb-2">${comp.company_name || 'Product Catalogue'}</h1><p class="text-slate-300">Explore our premium products</p></div><button onclick="closeCatalogue()" class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 transition"><i data-lucide="x" class="w-5 h-5"></i>Close</button></div></div></div>
+      <div class="max-w-6xl mx-auto px-4 py-12">${products.length === 0 ? `<div class="bg-white rounded-xl shadow-sm border p-12 text-center"><i data-lucide="package" class="w-12 h-12 text-slate-300 mx-auto mb-3"></i><p class="text-slate-400 text-lg">No products available yet</p></div>` : `<div class="mb-8 flex flex-wrap gap-2"><button onclick="filterCatalogue('all')" class="catalogue-filter-btn px-4 py-2 rounded-full font-semibold text-sm bg-blue-600 text-white transition active" data-filter="all">All Products</button>${categories.map(cat => `<button onclick="filterCatalogue('${cat}')" class="catalogue-filter-btn px-4 py-2 rounded-full font-semibold text-sm bg-slate-200 text-slate-700 hover:bg-slate-300 transition" data-filter="${cat}">${cat}</button>`).join('')}</div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">${products.map(prod => `<div class="bg-white rounded-xl shadow-sm hover:shadow-lg transition overflow-hidden flex flex-col group catalogue-product" data-category="${prod.category || 'Uncategorized'}"><div class="relative h-48 bg-gradient-to-br from-slate-100 to-slate-200 overflow-hidden flex items-center justify-center">${prod.product_photo ? `<img src="${prod.product_photo}" alt="${prod.name}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" onerror="this.style.display='none'">` : `<i data-lucide="package" class="w-16 h-16 text-slate-300"></i>`}${prod.quantity <= 0 ? `<div class="absolute inset-0 bg-black/50 flex items-center justify-center"><span class="bg-red-600 text-white px-4 py-2 rounded-lg font-semibold">Out of Stock</span></div>` : prod.quantity <= 5 ? `<div class="absolute top-3 right-3 bg-amber-600 text-white px-2 py-1 rounded text-xs font-semibold">Low Stock</div>` : ''}</div><div class="p-5 flex-1 flex flex-col">${prod.category ? `<span class="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-2">${prod.category}</span>`:''}<h3 class="text-lg font-bold text-slate-900 mb-1">${prod.name}</h3>${prod.description ? `<p class="text-sm text-slate-600 mb-3">${prod.description}</p>`:''}<div class="mt-auto"><div class="flex items-center justify-between mb-3"><span class="text-2xl font-bold text-blue-600">${formatCurrency(prod.price)}</span><span class="text-xs font-semibold text-slate-500">SKU: ${prod.sku || 'N/A'}</span></div><div class="text-sm text-slate-600 mb-3"><span class="font-semibold">${prod.quantity || 0}</span> in stock</div></div></div></div>`).join('')}</div>`}</div></div>`;
+    lucide.createIcons();
+  }
+  function filterCatalogue(category){
+    document.querySelectorAll('.catalogue-product').forEach(el => { el.style.display = (category === 'all' || el.dataset.category === category) ? 'flex' : 'none'; });
+    document.querySelectorAll('.catalogue-filter-btn').forEach(el => {
+      const on = el.dataset.filter === category;
+      el.classList.toggle('active', on);
+      if (on) { el.classList.remove('bg-slate-200','text-slate-700'); el.classList.add('bg-blue-600','text-white'); }
+      else { el.classList.remove('bg-blue-600','text-white'); el.classList.add('bg-slate-200','text-slate-700'); }
+    });
+  }
+  function closeCatalogue(){ isPublicCatalogueView = false; currentPage = 'products'; renderCurrentPage(); }
+  </script>
+ </body>
+</html>
