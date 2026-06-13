@@ -76,7 +76,9 @@
      <p class="text-slate-400 text-xs mt-1">Synced to Google Sheets</p>
     </div>
     <div class="flex-1 py-4 scrollable">
-     <div class="px-3 mb-2 text-xs text-slate-500 uppercase tracking-wider">Sales</div>
+     <div class="px-3 mb-2 text-xs text-slate-500 uppercase tracking-wider">Overview</div>
+     <button onclick="navigate('dashboard')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="dashboard"><i data-lucide="layout-dashboard" class="w-4 h-4"></i>Dashboard</button>
+     <div class="px-3 mt-4 mb-2 text-xs text-slate-500 uppercase tracking-wider">Sales</div>
      <button onclick="navigate('pos')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="pos"><i data-lucide="shopping-cart" class="w-4 h-4"></i>New Transaction</button>
      <button onclick="navigate('documents')" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left" data-nav="documents"><i data-lucide="file-text" class="w-4 h-4"></i>Transactions</button>
      <div class="px-3 mt-4 mb-2 text-xs text-slate-500 uppercase tracking-wider">Management</div>
@@ -98,6 +100,7 @@
       <h1 class="font-display text-lg font-bold">CloudPOS Pro</h1><button onclick="toggleMobileMenu()" class="p-1"><i data-lucide="x" class="w-5 h-5"></i></button>
      </div>
      <div class="flex-1 py-4 scrollable">
+      <button onclick="navigate('dashboard');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="layout-dashboard" class="w-4 h-4"></i>Dashboard</button>
       <button onclick="navigate('pos');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="shopping-cart" class="w-4 h-4"></i>New Transaction</button>
       <button onclick="navigate('documents');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="file-text" class="w-4 h-4"></i>Transactions</button>
       <button onclick="navigate('products');toggleMobileMenu()" class="sidebar-item w-full flex items-center gap-3 px-5 py-3 text-sm text-left"><i data-lucide="package" class="w-4 h-4"></i>Stock / Products</button>
@@ -186,7 +189,7 @@
     window.sheetsStore.setUrl(url);
     const ok = await window.sheetsStore.refresh();
     btn.disabled = false; btn.textContent = 'Connect & Load Data';
-    if (ok) { showApp(); navigate('pos'); showToast('Connected to Google Sheets'); }
+    if (ok) { showApp(); navigate('dashboard'); showToast('Connected to Google Sheets'); }
     else {
       errBox.textContent = 'Could not reach the sheet. Check the URL, make sure access is set to "Anyone", and that the deployment is active.';
       errBox.classList.remove('hidden');
@@ -208,6 +211,7 @@
   let editingProduct = null, editingCustomer = null, currentRecordCount = 0;
   let viewingTransaction = null, generatingDocType = null;
   let reportSortBy = 'transaction_number', reportSortOrder = 'desc';
+  let reportDateFrom = '', reportDateTo = '', reportSearchQuery = '';
   let productSortBy = 'name', productSortOrder = 'asc', productSearchQuery = '';
   let customerSearchQuery = '';
   let selectedProductCategory = null, quickAddMode = false;
@@ -243,7 +247,7 @@
 
   (async () => {
     const r = await window.dataSdk.init(dataHandler);
-    if (r.isOk) { showApp(); navigate('pos'); }
+    if (r.isOk) { showApp(); navigate('dashboard'); }
     else { showSetup(); }
   })();
 
@@ -273,6 +277,7 @@
     if (isPublicCatalogueView) { renderPublicCatalogue(c); }
     else {
       switch(currentPage) {
+        case 'dashboard': renderDashboard(c); break;
         case 'pos': renderPOS(c); break;
         case 'documents': renderDocuments(c); break;
         case 'view-docs': renderDocumentSelector(c); break;
@@ -318,6 +323,66 @@
     const num = String(existing.length + 1).padStart(5,'0');
     const year = new Date().getFullYear();
     return `TXN-${year}-${num}`;
+  }
+
+  /* ===== ANALYTICS HELPERS ===== */
+  const LOW_STOCK_THRESHOLD = 1;
+  function isLowStock(p){ return (p.quantity || 0) <= LOW_STOCK_THRESHOLD; }
+  function isOwed(txn){ return txn.transaction_status === 'invoice' || txn.transaction_status === 'delivery_order'; }
+  function isPaid(txn){ return txn.transaction_status === 'receipt'; }
+  function itemsOf(txn){
+    let raw;
+    try { raw = JSON.parse(txn.transaction_items || '[]'); } catch(e){ return []; }
+    return raw.map(item => {
+      if (Array.isArray(item)) { const p = products.find(pr => pr.__backendId === item[0]); return { productId:item[0], name:p?p.name:'Unknown', qty:item[1]||0, price:item[2]||0 }; }
+      return { productId:item.productId||item.p, name:item.name||item.n||'Unknown', qty:item.qty||item.q||0, price:item.price||item.pr||0 };
+    });
+  }
+  function computeTopProducts(txns){
+    const map = {};
+    txns.forEach(t => itemsOf(t).forEach(it => {
+      const key = it.productId || it.name;
+      if (!map[key]) map[key] = { name: it.name, qty: 0, revenue: 0 };
+      map[key].qty += it.qty; map[key].revenue += it.qty * it.price;
+    }));
+    return Object.values(map);
+  }
+  function customerBalance(customerId){
+    return documents.filter(d => d.transaction_customer_id === customerId && isOwed(d)).reduce((s,t) => s + (t.transaction_total||0), 0);
+  }
+
+  /* ===== DASHBOARD ===== */
+  function renderDashboard(container){
+    const today = new Date(); today.setHours(0,0,0,0);
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const paidTxns = documents.filter(isPaid);
+    const todaySales = paidTxns.filter(t => { const d = new Date(t.transaction_date); d.setHours(0,0,0,0); return d.getTime() === today.getTime(); }).reduce((s,t)=>s+(t.transaction_total||0),0);
+    const monthSales = paidTxns.filter(t => new Date(t.transaction_date) >= monthStart).reduce((s,t)=>s+(t.transaction_total||0),0);
+    const totalOwed = documents.filter(isOwed).reduce((s,t)=>s+(t.transaction_total||0),0);
+    const lowStock = products.filter(isLowStock);
+    const top = computeTopProducts(paidTxns).sort((a,b)=>b.qty-a.qty).slice(0,5);
+    const card = (label, value, sub, color, icon, onclick) => `<div class="bg-white rounded-xl shadow-sm border p-5 ${onclick ? 'cursor-pointer hover:shadow-md transition' : ''}" ${onclick ? `onclick="${onclick}"` : ''}><div class="flex items-center justify-between"><div><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${label}</p><p class="text-2xl font-bold text-slate-800 mt-1">${value}</p>${sub ? `<p class="text-xs text-slate-400 mt-1">${sub}</p>` : ''}</div><div class="w-11 h-11 rounded-lg bg-${color}-100 flex items-center justify-center"><i data-lucide="${icon}" class="w-5 h-5 text-${color}-600"></i></div></div></div>`;
+    container.innerHTML = `
+      <div class="mb-6"><h2 class="text-2xl font-bold text-slate-800">Dashboard</h2><p class="text-slate-500 text-sm mt-1">${getCompany().company_name || ''} &middot; ${new Date().toLocaleDateString('en-MY', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        ${card("Today's Sales", formatCurrency(todaySales), 'Paid receipts only', 'emerald', 'trending-up')}
+        ${card("This Month", formatCurrency(monthSales), monthStart.toLocaleDateString('en-MY',{month:'long',year:'numeric'}), 'blue', 'calendar')}
+        ${card("Outstanding", formatCurrency(totalOwed), 'Invoices/DOs unpaid', 'amber', 'clock', "navigate('reports')")}
+        ${card("Low Stock", lowStock.length, `${LOW_STOCK_THRESHOLD} or below`, lowStock.length ? 'red' : 'slate', 'alert-triangle', "navigate('products')")}
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-white rounded-xl shadow-sm border p-5">
+          <div class="flex items-center justify-between mb-4"><h3 class="font-semibold text-slate-700">Top Products</h3><button onclick="navigate('reports')" class="text-xs text-blue-600 hover:underline">View report</button></div>
+          ${top.length === 0 ? '<p class="text-slate-400 text-sm text-center py-6">No paid sales yet</p>' : `<div class="space-y-2">${top.map((p,i)=>`<div class="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50"><div class="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center flex-shrink-0">${i+1}</div><div class="flex-1 min-w-0"><p class="text-sm font-medium text-slate-800 truncate">${p.name}</p><p class="text-xs text-slate-500">${p.qty} sold &middot; ${formatCurrency(p.revenue)}</p></div></div>`).join('')}</div>`}
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-5">
+          <div class="flex items-center justify-between mb-4"><h3 class="font-semibold text-slate-700">Low Stock Alerts</h3><button onclick="navigate('products')" class="text-xs text-blue-600 hover:underline">Manage stock</button></div>
+          ${lowStock.length === 0 ? '<p class="text-slate-400 text-sm text-center py-6">All products well stocked</p>' : `<div class="space-y-2">${lowStock.slice(0,8).map(p=>`<div class="flex items-center justify-between p-2 rounded-lg bg-red-50"><div class="min-w-0"><p class="text-sm font-medium text-slate-800 truncate">${p.name}</p><p class="text-xs text-slate-500">${p.sku || ''}</p></div><span class="px-2 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 flex-shrink-0">${p.quantity||0} left</span></div>`).join('')}${lowStock.length>8?`<p class="text-xs text-slate-400 text-center pt-1">+${lowStock.length-8} more</p>`:''}</div>`}
+        </div>
+      </div>
+      <div class="mt-6"><button onclick="navigate('pos')" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-lg text-sm font-semibold flex items-center gap-2"><i data-lucide="plus" class="w-4 h-4"></i>New Transaction</button></div>
+    `;
+    lucide.createIcons();
   }
 
   /* ===== POS ===== */
@@ -680,7 +745,6 @@
     container.innerHTML = `
       <div class="mb-4 no-print"><button onclick="currentPage='view-docs'; renderCurrentPage()" class="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 mb-4"><i data-lucide="arrow-left" class="w-4 h-4"></i>Back</button>
         <div class="flex gap-2 flex-wrap">
-          <button onclick="printDocument()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><i data-lucide="printer" class="w-4 h-4"></i>Print</button>
           <button onclick="downloadPDF()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><i data-lucide="download" class="w-4 h-4"></i>Save PDF</button>
           ${generatingDocType !== 'quotation' ? `<button onclick="changeDocType('quotation')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">Quotation</button>`:''}
           ${generatingDocType === 'quotation' ? `<button onclick="changeDocType('invoice')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">Convert to Invoice</button>`:''}
@@ -911,7 +975,7 @@
       return 0;
     });
     if (filtered.length === 0) return '<tr><td colspan="6" class="py-8 text-center text-slate-400">No products found</td></tr>';
-    return filtered.map(p => `<tr class="border-b hover:bg-slate-50"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewProductSpecification('${p.__backendId}')">${p.name}</td><td class="py-3 px-4 text-slate-500 font-mono text-xs">${p.sku || '-'}</td><td class="py-3 px-4 text-slate-500">${p.category || '-'}</td><td class="py-3 px-4 text-right font-medium">${formatCurrency(p.price)}</td><td class="py-3 px-4 text-right"><input type="number" class="w-16 border rounded px-2 py-1 text-right text-sm" value="${p.quantity || 0}" onchange="updateStock('${p.__backendId}', this.value)" /></td><td class="py-3 px-4 text-center"><button onclick="editProduct('${p.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteProduct('${p.__backendId}')" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ml-2"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></td></tr>`).join('');
+    return filtered.map(p => `<tr class="border-b hover:bg-slate-50 ${isLowStock(p) ? 'bg-red-50/40' : ''}"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewProductSpecification('${p.__backendId}')">${p.name}${isLowStock(p) ? ' <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 align-middle">LOW</span>' : ''}</td><td class="py-3 px-4 text-slate-500 font-mono text-xs">${p.sku || '-'}</td><td class="py-3 px-4 text-slate-500">${p.category || '-'}</td><td class="py-3 px-4 text-right font-medium">${formatCurrency(p.price)}</td><td class="py-3 px-4 text-right"><input type="number" class="w-16 border rounded px-2 py-1 text-right text-sm ${isLowStock(p) ? 'border-red-300 text-red-700 font-semibold' : ''}" value="${p.quantity || 0}" onchange="updateStock('${p.__backendId}', this.value)" /></td><td class="py-3 px-4 text-center"><button onclick="editProduct('${p.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteProduct('${p.__backendId}')" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ml-2"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></td></tr>`).join('');
   }
   function showProductForm(product){
     editingProduct = product || null; const p = product || {};
@@ -957,14 +1021,17 @@
       (c.customer_email || '').toLowerCase().includes(q) ||
       (c.customer_phone || '').toLowerCase().includes(q)
     ) : customers;
+    const grandOwed = documents.filter(isOwed).reduce((s,t)=>s+(t.transaction_total||0),0);
     container.innerHTML = `<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"><div><h2 class="text-2xl font-bold text-slate-800">Customer Management</h2><p class="text-slate-500 text-sm mt-1">${customers.length} customers</p></div><button onclick="showCustomerForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 w-fit"><i data-lucide="plus" class="w-4 h-4"></i>Add Customer</button></div>
+      ${grandOwed > 0 ? `<div class="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3"><i data-lucide="alert-circle" class="w-5 h-5 text-amber-600"></i><div><p class="text-sm font-semibold text-amber-900">Total outstanding across all customers: ${formatCurrency(grandOwed)}</p><p class="text-xs text-amber-700">Unpaid invoices and delivery orders (not yet converted to Receipt)</p></div></div>` : ''}
       <div id="customerFormArea"></div>
       ${customers.length === 0 ? '' : `<div class="mb-4 relative"><i data-lucide="search" class="w-5 h-5 absolute left-3 top-2.5 text-slate-400"></i><input type="text" placeholder="Search by name, company, email, or phone..." class="w-full border rounded-lg px-10 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" oninput="updateCustomerSearch(this.value)" value="${customerSearchQuery}"></div>`}
       ${customers.length === 0 ? '<div class="bg-white rounded-xl shadow-sm border p-12 text-center"><p class="text-slate-400">No customers yet.</p></div>' : (filteredCustomers.length === 0 ? '<div class="bg-white rounded-xl shadow-sm border p-12 text-center"><p class="text-slate-400">No customers match your search.</p></div>' : `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">${filteredCustomers.map(c => {
         const custTransactions = documents.filter(d => d.transaction_customer_id === c.__backendId);
         const lastTxnDate = custTransactions.length > 0 ? new Date(custTransactions[custTransactions.length-1].transaction_date).toLocaleDateString('en-MY') : 'No transactions';
+        const balance = customerBalance(c.__backendId);
         const isEditing = editingCustomer && editingCustomer.__backendId === c.__backendId;
-        return `<div class="bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition ${isEditing ? 'ring-2 ring-blue-500':''}"><div class="flex items-start justify-between mb-3"><div class="flex-1"><h4 class="font-semibold text-slate-800">${c.customer_name}</h4>${c.customer_company ? `<p class="text-sm text-blue-600">${c.customer_company}</p>`:''}${c.customer_email ? `<p class="text-xs text-slate-500 mt-1">${c.customer_email}</p>`:''}${c.customer_phone ? `<p class="text-xs text-slate-500">${c.customer_phone}</p>`:''}${c.customer_address ? `<p class="text-xs text-slate-400 mt-1">${c.customer_address}</p>`:''}<p class="text-xs text-slate-400 mt-2 italic">Last transaction: ${lastTxnDate}</p></div><div class="flex gap-2 mt-3 flex-shrink-0"><button onclick="editCustomer('${c.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteCustomer('${c.__backendId}', this)" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></div></div>${isEditing ? '<p class="text-xs text-blue-600 font-semibold">Editing...</p>':''}</div>`;
+        return `<div class="bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition ${isEditing ? 'ring-2 ring-blue-500':''}"><div class="flex items-start justify-between mb-3"><div class="flex-1"><h4 class="font-semibold text-slate-800">${c.customer_name}</h4>${c.customer_company ? `<p class="text-sm text-blue-600">${c.customer_company}</p>`:''}${c.customer_email ? `<p class="text-xs text-slate-500 mt-1">${c.customer_email}</p>`:''}${c.customer_phone ? `<p class="text-xs text-slate-500">${c.customer_phone}</p>`:''}${c.customer_address ? `<p class="text-xs text-slate-400 mt-1">${c.customer_address}</p>`:''}<p class="text-xs text-slate-400 mt-2 italic">Last transaction: ${lastTxnDate}</p>${balance > 0 ? `<div class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200"><i data-lucide="alert-circle" class="w-3 h-3 text-amber-600"></i><span class="text-xs font-bold text-amber-700">Owes ${formatCurrency(balance)}</span></div>` : '<div class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200"><span class="text-xs font-semibold text-emerald-700">No outstanding balance</span></div>'}</div><div class="flex gap-2 mt-3 flex-shrink-0"><button onclick="editCustomer('${c.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteCustomer('${c.__backendId}', this)" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></div></div>${isEditing ? '<p class="text-xs text-blue-600 font-semibold">Editing...</p>':''}</div>`;
       }).join('')}</div>`)}`;
     if (editingCustomer) showCustomerForm(editingCustomer);
     lucide.createIcons();
@@ -1053,9 +1120,46 @@
   }
 
   /* ===== REPORTS ===== */
+  function getFilteredReportTxns(){
+    let list = [...documents];
+    if (reportDateFrom) { const from = new Date(reportDateFrom); from.setHours(0,0,0,0); list = list.filter(t => new Date(t.transaction_date) >= from); }
+    if (reportDateTo) { const to = new Date(reportDateTo); to.setHours(23,59,59,999); list = list.filter(t => new Date(t.transaction_date) <= to); }
+    if (reportSearchQuery) {
+      const q = reportSearchQuery;
+      list = list.filter(t => {
+        const cust = customers.find(c => c.__backendId === t.transaction_customer_id);
+        const name = cust ? cust.customer_name.toLowerCase() : 'walk-in customer';
+        return (t.transaction_number || '').toLowerCase().includes(q) || name.includes(q);
+      });
+    }
+    return list;
+  }
+
   function renderReports(container){
-    container.innerHTML = `<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"><div><h2 class="text-2xl font-bold text-slate-800">Customer Transaction Report</h2><p class="text-slate-500 text-sm mt-1">View and track customer transaction history</p></div><button onclick="printReports()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 w-fit no-print"><i data-lucide="printer" class="w-4 h-4"></i>Print Report</button></div>
-      <div class="bg-white rounded-xl shadow-sm border overflow-hidden" id="reportTable"><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-50 border-b">
+    const filtered = getFilteredReportTxns();
+    const totalAll = filtered.reduce((s,t)=>s+(t.transaction_total||0),0);
+    const totalPaid = filtered.filter(isPaid).reduce((s,t)=>s+(t.transaction_total||0),0);
+    const totalOwed = filtered.filter(isOwed).reduce((s,t)=>s+(t.transaction_total||0),0);
+    const top = computeTopProducts(filtered.filter(isPaid)).sort((a,b)=>b.qty-a.qty).slice(0,10);
+
+    container.innerHTML = `<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"><div><h2 class="text-2xl font-bold text-slate-800">Customer Transaction Report</h2><p class="text-slate-500 text-sm mt-1">${filtered.length} of ${documents.length} transactions shown</p></div><div class="flex gap-2 flex-wrap no-print"><button onclick="exportReportExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2"><i data-lucide="download" class="w-4 h-4"></i>Export Excel</button><button onclick="printReports()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2"><i data-lucide="printer" class="w-4 h-4"></i>Print</button></div></div>
+
+      <div class="bg-white rounded-xl shadow-sm border p-4 mb-4 no-print">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+          <div><label class="text-xs text-slate-500 block mb-1 font-medium">From Date</label><input type="date" value="${reportDateFrom}" onchange="updateReportFilter('from', this.value)" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-slate-500 block mb-1 font-medium">To Date</label><input type="date" value="${reportDateTo}" onchange="updateReportFilter('to', this.value)" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="text-xs text-slate-500 block mb-1 font-medium">Search</label><input type="text" placeholder="Receipt no. or customer..." value="${reportSearchQuery}" oninput="updateReportFilter('search', this.value)" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div class="flex gap-2"><button onclick="setReportRange('month')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-2 py-2 text-xs font-semibold">This Month</button><button onclick="clearReportFilter()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-2 py-2 text-xs font-semibold">Clear</button></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Total (all)</p><p class="text-xl font-bold text-slate-800 mt-1">${formatCurrency(totalAll)}</p></div>
+        <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Paid</p><p class="text-xl font-bold text-emerald-600 mt-1">${formatCurrency(totalPaid)}</p></div>
+        <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Outstanding</p><p class="text-xl font-bold text-amber-600 mt-1">${formatCurrency(totalOwed)}</p></div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-6" id="reportTable"><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-50 border-b">
         <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('customer_name')"><div class="flex items-center gap-2">Customer Name <span class="text-xs">${reportSortBy === 'customer_name' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
         <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('address')"><div class="flex items-center gap-2">Address <span class="text-xs">${reportSortBy === 'address' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
         <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('transaction_date')"><div class="flex items-center gap-2">Transaction Date <span class="text-xs">${reportSortBy === 'transaction_date' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
@@ -1063,13 +1167,61 @@
         <th class="text-left py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('delivery_method')"><div class="flex items-center gap-2">Delivery Method <span class="text-xs">${reportSortBy === 'delivery_method' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
         <th class="text-right py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('total_amount')"><div class="flex items-center justify-end gap-2">Total Amount (RM) <span class="text-xs">${reportSortBy === 'total_amount' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
         <th class="text-center py-3 px-4 font-semibold text-slate-600 cursor-pointer hover:bg-slate-100 transition" onclick="sortReports('status')"><div class="flex items-center justify-center gap-2">Status <span class="text-xs">${reportSortBy === 'status' ? (reportSortOrder === 'asc' ? '▲':'▼') : '⇅'}</span></div></th>
-      </tr></thead><tbody>${renderTransactionReportRows()}</tbody></table></div></div>`;
+        <th class="text-center py-3 px-4 font-semibold text-slate-600 no-print">Action</th>
+      </tr></thead><tbody>${renderTransactionReportRows()}</tbody></table></div></div>
+
+      <div class="bg-white rounded-xl shadow-sm border p-5"><h3 class="font-semibold text-slate-700 mb-4 flex items-center gap-2"><i data-lucide="award" class="w-4 h-4 text-blue-600"></i>Top Products ${reportDateFrom||reportDateTo ? '(filtered period)' : ''}</h3>
+        ${top.length === 0 ? '<p class="text-slate-400 text-sm text-center py-6">No paid sales in this range</p>' : `<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-50 border-b"><th class="text-left py-2 px-3 font-semibold text-slate-600">#</th><th class="text-left py-2 px-3 font-semibold text-slate-600">Product</th><th class="text-right py-2 px-3 font-semibold text-slate-600">Qty Sold</th><th class="text-right py-2 px-3 font-semibold text-slate-600">Revenue</th></tr></thead><tbody>${top.map((p,i)=>`<tr class="border-b hover:bg-slate-50"><td class="py-2 px-3 text-slate-500">${i+1}</td><td class="py-2 px-3 font-medium text-slate-800">${p.name}</td><td class="py-2 px-3 text-right text-slate-700">${p.qty}</td><td class="py-2 px-3 text-right font-semibold text-slate-800">${formatCurrency(p.revenue)}</td></tr>`).join('')}</tbody></table></div>`}
+      </div>`;
     lucide.createIcons();
+  }
+  function updateReportFilter(which, val){
+    if (which === 'from') reportDateFrom = val;
+    else if (which === 'to') reportDateTo = val;
+    else if (which === 'search') reportSearchQuery = val.toLowerCase();
+    renderCurrentPage();
+  }
+  function setReportRange(kind){
+    if (kind === 'month'){ const n = new Date(); reportDateFrom = new Date(n.getFullYear(), n.getMonth(), 1).toISOString().split('T')[0]; reportDateTo = new Date(n.getFullYear(), n.getMonth()+1, 0).toISOString().split('T')[0]; }
+    renderCurrentPage();
+  }
+  function clearReportFilter(){ reportDateFrom = ''; reportDateTo = ''; reportSearchQuery = ''; renderCurrentPage(); }
+  function exportReportExcel(){
+    if (typeof XLSX === 'undefined') { showToast('Excel library not loaded yet', 'error'); return; }
+    const filtered = getFilteredReportTxns();
+    if (filtered.length === 0) { showToast('No transactions to export', 'error'); return; }
+    const rows = filtered.map(t => {
+      const cust = customers.find(c => c.__backendId === t.transaction_customer_id);
+      return {
+        'Transaction No': t.transaction_number || '',
+        'Date': new Date(t.transaction_date).toLocaleDateString('en-MY'),
+        'Customer': cust ? cust.customer_name : 'Walk-in Customer',
+        'Company': cust ? (cust.customer_company || '') : '',
+        'Payment Method': t.transaction_payment_method || '',
+        'Delivery Method': getDeliveryMethodLabel(t.transaction_delivery_method),
+        'Status': t.transaction_status || '',
+        'Subtotal': t.transaction_subtotal || 0,
+        'Tax': t.transaction_tax || 0,
+        'Total': t.transaction_total || 0,
+        'Paid': isPaid(t) ? 'Yes' : (isOwed(t) ? 'Owed' : 'No')
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{wch:16},{wch:12},{wch:22},{wch:20},{wch:14},{wch:14},{wch:12},{wch:10},{wch:8},{wch:10},{wch:8}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+    // second sheet: top products
+    const top = computeTopProducts(filtered.filter(isPaid)).sort((a,b)=>b.qty-a.qty);
+    if (top.length){ const ws2 = XLSX.utils.json_to_sheet(top.map((p,i)=>({Rank:i+1, Product:p.name, 'Qty Sold':p.qty, Revenue:p.revenue}))); ws2['!cols']=[{wch:6},{wch:28},{wch:10},{wch:12}]; XLSX.utils.book_append_sheet(wb, ws2, 'Top Products'); }
+    const today = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `sales-report-${today}.xlsx`);
+    showToast('Report exported to Excel');
   }
   function sortReports(field){ if (reportSortBy === field) reportSortOrder = reportSortOrder === 'asc' ? 'desc' : 'asc'; else { reportSortBy = field; reportSortOrder = 'asc'; } renderCurrentPage(); }
   function renderTransactionReportRows(){
-    if (documents.length === 0) return '<tr><td colspan="7" class="py-8 text-center text-slate-400">No transactions yet</td></tr>';
-    let sorted = [...documents];
+    const base = getFilteredReportTxns();
+    if (base.length === 0) return '<tr><td colspan="8" class="py-8 text-center text-slate-400">No transactions match the filters</td></tr>';
+    let sorted = [...base];
     sorted.sort((a,b) => {
       let aVal, bVal;
       switch(reportSortBy){
@@ -1094,7 +1246,7 @@
       const color = statusColors[txn.transaction_status] || 'gray';
       const statusLabel = txn.transaction_status.charAt(0).toUpperCase() + txn.transaction_status.slice(1).replace('_',' ');
       const deliveryLabel = getDeliveryMethodLabel(txn.transaction_delivery_method);
-      return `<tr class="border-b hover:bg-slate-50 transition"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewCustomerTransactions('${txn.transaction_customer_id}')">${custName}</td><td class="py-3 px-4 text-slate-600 text-xs">${custAddress}</td><td class="py-3 px-4 text-slate-600">${date}</td><td class="py-3 px-4 font-mono text-xs text-slate-600">${txn.transaction_number}</td><td class="py-3 px-4 text-sm text-slate-700">${deliveryLabel}</td><td class="py-3 px-4 text-right font-bold text-slate-800">${formatCurrency(txn.transaction_total)}</td><td class="py-3 px-4 text-center"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-${color}-100 text-${color}-700">${statusLabel}</span></td></tr>`;
+      return `<tr class="border-b hover:bg-slate-50 transition"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewCustomerTransactions('${txn.transaction_customer_id}')">${custName}</td><td class="py-3 px-4 text-slate-600 text-xs">${custAddress}</td><td class="py-3 px-4 text-slate-600">${date}</td><td class="py-3 px-4 font-mono text-xs text-slate-600">${txn.transaction_number}</td><td class="py-3 px-4 text-sm text-slate-700">${deliveryLabel}</td><td class="py-3 px-4 text-right font-bold text-slate-800">${formatCurrency(txn.transaction_total)}</td><td class="py-3 px-4 text-center"><span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-${color}-100 text-${color}-700">${statusLabel}</span></td><td class="py-3 px-4 text-center no-print"><button onclick="viewAndReprintTransaction('${txn.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition"><i data-lucide="printer" class="w-3 h-3"></i>Reprint</button></td></tr>`;
     }).join('');
   }
   function printReports(){
