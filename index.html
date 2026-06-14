@@ -212,6 +212,7 @@
   let viewingTransaction = null, generatingDocType = null;
   let reportSortBy = 'transaction_number', reportSortOrder = 'desc';
   let reportDateFrom = '', reportDateTo = '', reportSearchQuery = '';
+  let reportOutstandingOnly = false;
   let productSortBy = 'name', productSortOrder = 'asc', productSearchQuery = '';
   let customerSearchQuery = '';
   let selectedProductCategory = null, quickAddMode = false;
@@ -367,7 +368,7 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         ${card("Today's Sales", formatCurrency(todaySales), 'Paid receipts only', 'emerald', 'trending-up')}
         ${card("This Month", formatCurrency(monthSales), monthStart.toLocaleDateString('en-MY',{month:'long',year:'numeric'}), 'blue', 'calendar')}
-        ${card("Outstanding", formatCurrency(totalOwed), 'Invoices/DOs unpaid', 'amber', 'clock', "navigate('reports')")}
+        ${card("Outstanding", formatCurrency(totalOwed), 'Invoices/DOs unpaid', 'amber', 'clock', "showOutstanding()")}
         ${card("Low Stock", lowStock.length, `${LOW_STOCK_THRESHOLD} or below`, lowStock.length ? 'red' : 'slate', 'alert-triangle', "navigate('products')")}
       </div>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1179,6 +1180,7 @@
   /* ===== REPORTS ===== */
   function getFilteredReportTxns(){
     let list = [...documents];
+    if (reportOutstandingOnly) list = list.filter(isOwed);
     if (reportDateFrom) { const from = new Date(reportDateFrom); from.setHours(0,0,0,0); list = list.filter(t => new Date(t.transaction_date) >= from); }
     if (reportDateTo) { const to = new Date(reportDateTo); to.setHours(23,59,59,999); list = list.filter(t => new Date(t.transaction_date) <= to); }
     if (reportSearchQuery) {
@@ -1208,12 +1210,16 @@
           <div><label class="text-xs text-slate-500 block mb-1 font-medium">Search</label><input type="text" placeholder="Receipt no. or customer..." value="${reportSearchQuery}" oninput="updateReportFilter('search', this.value)" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
           <div class="flex gap-2"><button onclick="setReportRange('month')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-2 py-2 text-xs font-semibold">This Month</button><button onclick="clearReportFilter()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-2 py-2 text-xs font-semibold">Clear</button></div>
         </div>
+        <div class="mt-3 pt-3 border-t flex items-center gap-2">
+          <button onclick="toggleOutstandingOnly()" class="${reportOutstandingOnly ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'} rounded-lg px-3 py-2 text-xs font-semibold flex items-center gap-2 transition"><i data-lucide="${reportOutstandingOnly ? 'check' : 'clock'}" class="w-3.5 h-3.5"></i>${reportOutstandingOnly ? 'Showing Outstanding Only' : 'Show Outstanding Only'}</button>
+          ${reportOutstandingOnly ? '<span class="text-xs text-amber-700">Invoices &amp; delivery orders not yet paid</span>' : ''}
+        </div>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Total (all)</p><p class="text-xl font-bold text-slate-800 mt-1">${formatCurrency(totalAll)}</p></div>
         <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Paid</p><p class="text-xl font-bold text-emerald-600 mt-1">${formatCurrency(totalPaid)}</p></div>
-        <div class="bg-white rounded-xl shadow-sm border p-4"><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Outstanding</p><p class="text-xl font-bold text-amber-600 mt-1">${formatCurrency(totalOwed)}</p></div>
+        <div onclick="toggleOutstandingOnly()" class="bg-white rounded-xl shadow-sm border p-4 cursor-pointer hover:shadow-md transition ${reportOutstandingOnly ? 'ring-2 ring-amber-400' : ''}"><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Outstanding ${reportOutstandingOnly ? '<span class="text-amber-600">(filtered)</span>' : '<span class="text-slate-400 normal-case font-normal">— click to filter</span>'}</p><p class="text-xl font-bold text-amber-600 mt-1">${formatCurrency(totalOwed)}</p></div>
       </div>
 
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-6" id="reportTable"><div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-slate-50 border-b">
@@ -1242,7 +1248,9 @@
     if (kind === 'month'){ const n = new Date(); reportDateFrom = new Date(n.getFullYear(), n.getMonth(), 1).toISOString().split('T')[0]; reportDateTo = new Date(n.getFullYear(), n.getMonth()+1, 0).toISOString().split('T')[0]; }
     renderCurrentPage();
   }
-  function clearReportFilter(){ reportDateFrom = ''; reportDateTo = ''; reportSearchQuery = ''; renderCurrentPage(); }
+  function clearReportFilter(){ reportDateFrom = ''; reportDateTo = ''; reportSearchQuery = ''; reportOutstandingOnly = false; renderCurrentPage(); }
+  function toggleOutstandingOnly(){ reportOutstandingOnly = !reportOutstandingOnly; renderCurrentPage(); }
+  function showOutstanding(){ reportOutstandingOnly = true; reportDateFrom = ''; reportDateTo = ''; reportSearchQuery = ''; navigate('reports'); }
   function exportReportExcel(){
     if (typeof XLSX === 'undefined') { showToast('Excel library not loaded yet', 'error'); return; }
     const filtered = getFilteredReportTxns();
