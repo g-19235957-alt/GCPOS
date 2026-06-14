@@ -150,18 +150,19 @@
       });
       return res.json();
     },
-    async create(record) {
-      try { const j = await this._post({ action:'create', record }); if (j.ok){ await this.refresh(); return {isOk:true, record:j.record}; } return {isOk:false}; }
+    async create(record, silent) {
+      try { const j = await this._post({ action:'create', record }); if (j.ok){ if (silent){ this.cache.push(j.record); } else { await this.refresh(); } return {isOk:true, record:j.record}; } return {isOk:false}; }
       catch(e){ console.error(e); return {isOk:false}; }
     },
-    async update(record) {
-      try { const j = await this._post({ action:'update', record }); if (j.ok){ await this.refresh(); return {isOk:true, record:j.record}; } return {isOk:false}; }
+    async update(record, silent) {
+      try { const j = await this._post({ action:'update', record }); if (j.ok){ if (silent){ const i = this.cache.findIndex(r => r.__backendId === j.record.__backendId); if (i >= 0) this.cache[i] = j.record; } else { await this.refresh(); } return {isOk:true, record:j.record}; } return {isOk:false}; }
       catch(e){ console.error(e); return {isOk:false}; }
     },
-    async delete(record) {
-      try { const j = await this._post({ action:'delete', id: record.__backendId }); if (j.ok){ await this.refresh(); return {isOk:true}; } return {isOk:false}; }
+    async delete(record, silent) {
+      try { const j = await this._post({ action:'delete', id: record.__backendId }); if (j.ok){ if (silent){ this.cache = this.cache.filter(r => r.__backendId !== record.__backendId); } else { await this.refresh(); } return {isOk:true}; } return {isOk:false}; }
       catch(e){ console.error(e); return {isOk:false}; }
-    }
+    },
+    pushCacheToUI(){ if (this.handler && this.handler.onDataChanged) this.handler.onDataChanged(this.cache); }
   };
   window.dataSdk = window.sheetsStore;
 
@@ -660,14 +661,31 @@
       const existingTxn = documents.find(d => d.__backendId === window.editingTransactionId);
       const oldItemsRaw = JSON.parse(existingTxn.transaction_items || '[]');
       const oldItems = oldItemsRaw.map(item => Array.isArray(item) ? { productId:item[0], qty:item[1] } : { productId:item.p||item.productId, qty:item.q||item.qty });
-      result = await window.dataSdk.update({ ...existingTxn, ...data });
-      if (result.isOk) {
-        for (const oldItem of oldItems) { const product = products.find(p => p.__backendId === oldItem.productId); if (product) await window.dataSdk.update({ ...product, quantity:(product.quantity||0)+oldItem.qty }); }
-        for (const ci of cartItemsCompressed) { const product = products.find(p => p.__backendId === ci[0]); if (product) await window.dataSdk.update({ ...product, quantity:Math.max(0,(product.quantity||0)-ci[1]) }); }
+
+      // Compute NET stock change per product (old qty restored, new qty deducted)
+      const delta = {}; // productId -> net change to apply to stock
+      oldItems.forEach(it => { if (it.productId) delta[it.productId] = (delta[it.productId]||0) + (it.qty||0); }); // restore
+      cartItemsCompressed.forEach(ci => { delta[ci[0]] = (delta[ci[0]]||0) - (ci[1]||0); }); // deduct
+
+      // Fire the transaction update AND all stock writes together in one batch
+      const writes = [ window.dataSdk.update({ ...existingTxn, ...data }, true) ];
+      for (const pid in delta) {
+        if (delta[pid] === 0) continue;
+        const product = products.find(p => p.__backendId === pid);
+        if (product) writes.push(window.dataSdk.update({ ...product, quantity: Math.max(0, (product.quantity||0) + delta[pid]) }, true));
       }
+      const results = await Promise.all(writes);
+      result = results[0];
+      if (result.isOk) window.dataSdk.pushCacheToUI();
     } else {
-      result = await window.dataSdk.create(data);
-      if (result.isOk) { for (const ci of cartItemsCompressed) { const product = products.find(p => p.__backendId === ci[0]); if (product) await window.dataSdk.update({ ...product, quantity:Math.max(0,(product.quantity||0)-ci[1]) }); } }
+      const writes = [ window.dataSdk.create(data, true) ];
+      for (const ci of cartItemsCompressed) {
+        const product = products.find(p => p.__backendId === ci[0]);
+        if (product) writes.push(window.dataSdk.update({ ...product, quantity: Math.max(0,(product.quantity||0)-ci[1]) }, true));
+      }
+      const results = await Promise.all(writes);
+      result = results[0];
+      if (result.isOk) window.dataSdk.pushCacheToUI();
     }
     btn.disabled = false; btn.textContent = window.editingTransactionId ? 'Update Transaction' : 'Save Transaction';
     if (result.isOk) {
