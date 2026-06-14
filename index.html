@@ -363,6 +363,16 @@
     const totalOwed = documents.filter(isOwed).reduce((s,t)=>s+(t.transaction_total||0),0);
     const lowStock = products.filter(isLowStock);
     const top = computeTopProducts(paidTxns).sort((a,b)=>b.qty-a.qty).slice(0,5);
+    // Last 6 months paid income
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const start = new Date(d.getFullYear(), d.getMonth(), 1);
+      const end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      const total = paidTxns.filter(t => { const td = new Date(t.transaction_date); return td >= start && td < end; }).reduce((s,t)=>s+(t.transaction_total||0),0);
+      months.push({ label: d.toLocaleDateString('en-MY', { month:'short' }), full: d.toLocaleDateString('en-MY', { month:'long', year:'numeric' }), total });
+    }
+    const maxMonth = Math.max(...months.map(m=>m.total), 1);
     const card = (label, value, sub, color, icon, onclick) => `<div class="bg-white rounded-xl shadow-sm border p-5 ${onclick ? 'cursor-pointer hover:shadow-md transition' : ''}" ${onclick ? `onclick="${onclick}"` : ''}><div class="flex items-center justify-between"><div><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${label}</p><p class="text-2xl font-bold text-slate-800 mt-1">${value}</p>${sub ? `<p class="text-xs text-slate-400 mt-1">${sub}</p>` : ''}</div><div class="w-11 h-11 rounded-lg bg-${color}-100 flex items-center justify-center"><i data-lucide="${icon}" class="w-5 h-5 text-${color}-600"></i></div></div></div>`;
     container.innerHTML = `
       <div class="mb-6"><h2 class="text-2xl font-bold text-slate-800">Dashboard</h2><p class="text-slate-500 text-sm mt-1">${getCompany().company_name || ''} &middot; ${new Date().toLocaleDateString('en-MY', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div>
@@ -371,6 +381,12 @@
         ${card("This Month", formatCurrency(monthSales), monthStart.toLocaleDateString('en-MY',{month:'long',year:'numeric'}), 'blue', 'calendar')}
         ${card("Outstanding", formatCurrency(totalOwed), 'Invoices/DOs unpaid', 'amber', 'clock', "showOutstanding()")}
         ${card("Low Stock", lowStock.length, `${LOW_STOCK_THRESHOLD} or below`, lowStock.length ? 'red' : 'slate', 'alert-triangle', "navigate('products')")}
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4 mb-6">
+        <div class="flex items-center justify-between mb-3"><h3 class="font-semibold text-slate-700 text-sm">Income by Month</h3><span class="text-xs text-slate-400">Last 6 months &middot; paid receipts</span></div>
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          ${months.map(m => `<div class="rounded-lg bg-slate-50 border p-2 text-center" title="${m.full}"><p class="text-[11px] text-slate-500 font-medium">${m.label}</p><p class="text-sm font-bold text-slate-800 mt-0.5">${formatCurrency(m.total)}</p></div>`).join('')}
+        </div>
       </div>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="bg-white rounded-xl shadow-sm border p-5">
