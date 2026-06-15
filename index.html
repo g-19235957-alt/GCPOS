@@ -742,6 +742,7 @@
             ${o.order_organization?`<p><span class="text-slate-400">Org:</span> ${o.order_organization}</p>`:''}
             ${o.order_role?`<p><span class="text-slate-400">Role:</span> ${o.order_role}</p>`:''}
             <p><span class="text-slate-400">Phone:</span> ${o.order_phone||'-'}</p>
+            ${o.order_payment?`<p><span class="text-slate-400">Payment:</span> ${({cash:'Cash', lpo:'LPO', qr_banking:'Online Banking'})[o.order_payment] || o.order_payment}</p>`:''}
             ${o.order_address?`<p><span class="text-slate-400">Address:</span> ${o.order_address}</p>`:''}
             ${o.order_notes?`<p><span class="text-slate-400">Notes:</span> ${o.order_notes}</p>`:''}
           </div>
@@ -763,7 +764,7 @@
     window.editingTransactionId = null;
     window.currentTaxPercent = 6;
     window.transactionDate = null;
-    window.editingPaymentMethod = 'cash';
+    window.editingPaymentMethod = o.order_payment || 'cash';
     window.editingDeliveryMethod = 'shipping';
     const contact = [o.order_name && ('Name: '+o.order_name), o.order_organization && ('Org: '+o.order_organization), o.order_role && ('Role: '+o.order_role), o.order_phone && ('Phone: '+o.order_phone), o.order_address && ('Address: '+o.order_address), o.order_notes && ('Notes: '+o.order_notes)].filter(Boolean).join(' | ');
     window.editingNotes = 'ONLINE ORDER — ' + contact;
