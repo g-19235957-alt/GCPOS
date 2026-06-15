@@ -220,6 +220,7 @@
   let customerSearchQuery = '';
   let selectedProductCategory = null, quickAddMode = false;
   let viewingProduct = null, viewingCustomerForReport = null, isPublicCatalogueView = false;
+  let editingVariants = [];
   let onlineOrders = [];
   let deletingProductId = null;
 
@@ -380,9 +381,9 @@
     const maxMonth = Math.max(...months.map(m=>m.total), 1);
     const card = (label, value, sub, color, icon, onclick) => `<div class="bg-white rounded-xl shadow-sm border p-5 ${onclick ? 'cursor-pointer hover:shadow-md transition' : ''}" ${onclick ? `onclick="${onclick}"` : ''}><div class="flex items-center justify-between"><div><p class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${label}</p><p class="text-2xl font-bold text-slate-800 mt-1">${value}</p>${sub ? `<p class="text-xs text-slate-400 mt-1">${sub}</p>` : ''}</div><div class="w-11 h-11 rounded-lg bg-${color}-100 flex items-center justify-center"><i data-lucide="${icon}" class="w-5 h-5 text-${color}-600"></i></div></div></div>`;
     container.innerHTML = `
-      <div class="mb-6"><h2 class="text-2xl font-bold text-slate-800">Dashboard</h2><p class="text-slate-500 text-sm mt-1">${getCompany().company_name || ''} &middot; ${new Date().toLocaleDateString('en-MY', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div>
+      <div class="mb-6 flex items-start justify-between gap-3"><div><h2 class="text-2xl font-bold text-slate-800">Dashboard</h2><p class="text-slate-500 text-sm mt-1">${getCompany().company_name || ''} &middot; ${new Date().toLocaleDateString('en-MY', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div><button onclick="forceRefresh()" class="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-lg px-3 py-2 text-sm font-semibold flex items-center gap-2 flex-shrink-0"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span class="hidden sm:inline">Refresh</span></button></div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        ${card("Today's Sales", formatCurrency(todaySales), 'Paid receipts only', 'emerald', 'trending-up')}
+        ${card("Today's Sales", formatCurrency(todaySales), 'Paid receipts · tap to view', 'emerald', 'trending-up', "showTodaySales()")}
         ${card("This Month", formatCurrency(monthSales), monthStart.toLocaleDateString('en-MY',{month:'long',year:'numeric'}), 'blue', 'calendar')}
         ${card("Outstanding", formatCurrency(totalOwed), 'Invoices/DOs unpaid', 'amber', 'clock', "showOutstanding()")}
         ${card("Low Stock", lowStock.length, `${LOW_STOCK_THRESHOLD} or below`, lowStock.length ? 'red' : 'slate', 'alert-triangle', "navigate('products')")}
@@ -514,7 +515,7 @@
     if (cart.length === 0) return '<p class="text-slate-400 text-sm text-center py-6">No items added yet</p>';
     return `<div class="space-y-2">${cart.map((item,i) => `
       <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
-        <div class="flex-1 min-w-0"><p class="text-sm font-medium text-slate-800 truncate">${item.name}</p><p class="text-xs text-slate-500">${item.sku || ''}</p></div>
+        <div class="flex-1 min-w-0"><p class="text-sm font-medium text-slate-800 truncate">${item.name}${item.variantName?` <span class="text-blue-600">(${item.variantName})</span>`:''}</p><p class="text-xs text-slate-500">${item.sku || ''}</p></div>
         <input type="number" value="${item.qty}" min="1" class="w-14 border rounded px-2 py-1 text-sm text-center" onchange="updateCartQty(${i}, this.value)" />
         <input type="number" value="${item.price}" min="0" step="0.01" class="w-20 border rounded px-2 py-1 text-sm text-right" onchange="updateCartPrice(${i}, this.value)" />
         <span class="text-sm font-semibold text-slate-700 w-20 text-right">${formatCurrency(item.qty * item.price)}</span>
@@ -567,16 +568,43 @@
       : filtered.map(p => `<div class="dropdown-item px-4 py-2.5 cursor-pointer border-b last:border-0 hover:bg-emerald-50" onclick="quickAddToCart('${p.__backendId}', ${quantity})"><div class="font-medium text-sm text-slate-800">${p.name}</div><div class="text-xs text-slate-500">${p.sku || ''} &middot; ${formatCurrency(p.price)} &middot; Adding: ${quantity}x</div></div>`).join('');
     dd.classList.remove('hidden');
   }
+  function getVariants(p){ try { const v = p.variants ? JSON.parse(p.variants) : []; return Array.isArray(v) ? v : []; } catch(e){ return []; } }
   function addToCart(productId) {
     const p = products.find(pr => pr.__backendId === productId); if (!p) return;
-    const existing = cart.find(c => c.productId === productId);
+    const variants = getVariants(p);
+    if (variants.length){ openVariantPicker(p, variants); return; }
+    const existing = cart.find(c => c.productId === productId && !c.variantName);
     if (existing) existing.qty++; else cart.push({ productId, name:p.name, sku:p.sku, price:p.price, qty:1 });
     document.getElementById('productDropdown')?.classList.add('hidden');
     document.getElementById('productSearch').value = ''; renderCurrentPage();
   }
+  function openVariantPicker(p, variants){
+    document.getElementById('productDropdown')?.classList.add('hidden');
+    const overlay = document.createElement('div');
+    overlay.id = 'variantPickerOverlay';
+    overlay.className = 'fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/50';
+    overlay.innerHTML = `<div class="bg-white rounded-xl shadow-xl w-full max-w-sm p-5">
+      <div class="flex items-center justify-between mb-3"><h3 class="font-bold text-slate-800">${p.name}</h3><button onclick="closeVariantPicker()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+      <p class="text-xs text-slate-500 mb-3">Choose ${(p.variant_label||'option').toLowerCase()}:</p>
+      <div class="space-y-2">${variants.map((v,i)=>`<button onclick="pickVariant('${p.__backendId}',${i})" class="w-full flex items-center justify-between border rounded-lg px-3 py-2.5 text-sm hover:bg-blue-50 hover:border-blue-300 transition ${(v.stock||0)<=0?'opacity-50':''}"><span class="font-medium text-slate-800">${v.name}</span><span class="text-slate-500">${formatCurrency(v.price)} · ${v.stock||0} left</span></button>`).join('')}</div>
+    </div>`;
+    document.body.appendChild(overlay);
+    lucide.createIcons();
+  }
+  function closeVariantPicker(){ const o = document.getElementById('variantPickerOverlay'); if (o) o.remove(); }
+  function pickVariant(productId, vi){
+    const p = products.find(pr => pr.__backendId === productId); if (!p) return;
+    const variants = getVariants(p); const v = variants[vi]; if (!v) return;
+    const existing = cart.find(c => c.productId === productId && c.variantName === v.name);
+    if (existing) existing.qty++;
+    else cart.push({ productId, name:p.name, sku:p.sku, price:v.price, qty:1, variantName:v.name });
+    closeVariantPicker();
+    document.getElementById('productSearch').value = ''; renderCurrentPage();
+  }
   function quickAddToCart(productId, quantity) {
     const p = products.find(pr => pr.__backendId === productId); if (!p) return;
-    const existing = cart.find(c => c.productId === productId);
+    if (getVariants(p).length){ openVariantPicker(p, getVariants(p)); return; }
+    const existing = cart.find(c => c.productId === productId && !c.variantName);
     if (existing) existing.qty += quantity; else cart.push({ productId, name:p.name, sku:p.sku, price:p.price, qty:quantity });
     document.getElementById('productDropdown')?.classList.add('hidden');
     document.getElementById('productSearch').value = ''; renderCurrentPage();
@@ -638,9 +666,9 @@
     return itemsRaw.map(item => {
       if (Array.isArray(item)) {
         const product = products.find(p => p.__backendId === item[0]);
-        return { productId:item[0], name: product ? product.name : 'Unknown Product', sku: product ? (product.sku||'') : '', qty:item[1], price:item[2] };
+        return { productId:item[0], name: product ? product.name : 'Unknown Product', sku: product ? (product.sku||'') : '', qty:item[1], price:item[2], variantName: item[3] || '' };
       }
-      return { productId:item.productId||item.p, name:item.name||item.n||'Unknown Product', sku:item.sku||item.s||'', qty:item.qty||item.q||0, price:item.price||item.pr||0 };
+      return { productId:item.productId||item.p, name:item.name||item.n||'Unknown Product', sku:item.sku||item.s||'', qty:item.qty||item.q||0, price:item.price||item.pr||0, variantName: item.variantName || '' };
     });
   }
   function editTransaction(id){
@@ -667,7 +695,7 @@
     const selectedDate = document.getElementById('transDate')?.value || new Date().toISOString().split('T')[0];
     const transactionDate = new Date(selectedDate).toISOString();
     const btn = event.target; btn.disabled = true; btn.textContent = window.editingTransactionId ? 'Updating...' : 'Saving...';
-    const cartItemsCompressed = cart.map(item => [item.productId, item.qty, item.price]);
+    const cartItemsCompressed = cart.map(item => [item.productId, item.qty, item.price, item.variantName || '']);
     const data = {
       type:'transaction', transaction_type:'standard',
       transaction_number: window.editingTransactionId ? documents.find(d => d.__backendId === window.editingTransactionId).transaction_number : generateTransactionNumber(),
@@ -700,9 +728,26 @@
       if (result.isOk) window.dataSdk.pushCacheToUI();
     } else {
       const writes = [ window.dataSdk.create(data, true) ];
+      // Aggregate deductions per product (handles base + multiple variants)
+      const prodUpdates = {}; // productId -> { baseDeduct, variantDeduct:{name:qty} }
       for (const ci of cartItemsCompressed) {
-        const product = products.find(p => p.__backendId === ci[0]);
-        if (product) writes.push(window.dataSdk.update({ ...product, quantity: Math.max(0,(product.quantity||0)-ci[1]) }, true));
+        const pid = ci[0], qty = ci[1], vname = ci[3] || '';
+        if (!prodUpdates[pid]) prodUpdates[pid] = { baseDeduct:0, variantDeduct:{} };
+        if (vname) prodUpdates[pid].variantDeduct[vname] = (prodUpdates[pid].variantDeduct[vname]||0) + qty;
+        else prodUpdates[pid].baseDeduct += qty;
+      }
+      for (const pid in prodUpdates){
+        const product = products.find(p => p.__backendId === pid); if (!product) continue;
+        const u = prodUpdates[pid];
+        let patch = { ...product };
+        if (u.baseDeduct) patch.quantity = Math.max(0,(product.quantity||0) - u.baseDeduct);
+        const vnames = Object.keys(u.variantDeduct);
+        if (vnames.length){
+          let vars = getVariants(product);
+          vars = vars.map(v => u.variantDeduct[v.name] ? { ...v, stock: Math.max(0,(v.stock||0) - u.variantDeduct[v.name]) } : v);
+          patch.variants = JSON.stringify(vars);
+        }
+        writes.push(window.dataSdk.update(patch, true));
       }
       const results = await Promise.all(writes);
       result = results[0];
@@ -746,7 +791,7 @@
             ${o.order_address?`<p><span class="text-slate-400">Address:</span> ${o.order_address}</p>`:''}
             ${o.order_notes?`<p><span class="text-slate-400">Notes:</span> ${o.order_notes}</p>`:''}
           </div>
-          <div class="mt-3 bg-slate-50 rounded-lg p-3"><p class="text-xs font-semibold text-slate-600 mb-1">${items.length} item${items.length!==1?'s':''}</p><div class="space-y-1">${items.map(it=>{ const p = products.find(pr=>pr.__backendId===it[0]); const nm = p?p.name:'(product removed)'; return `<div class="flex justify-between text-xs"><span class="text-slate-700">${nm} &times; ${it[1]}</span><span class="text-slate-600">${formatCurrency(it[1]*it[2])}</span></div>`; }).join('')}</div><div class="flex justify-between text-sm font-bold text-slate-800 border-t mt-2 pt-2"><span>Total</span><span>${formatCurrency(o.order_total||0)}</span></div></div>
+          <div class="mt-3 bg-slate-50 rounded-lg p-3"><p class="text-xs font-semibold text-slate-600 mb-1">${items.length} item${items.length!==1?'s':''}</p><div class="space-y-1">${items.map(it=>{ const p = products.find(pr=>pr.__backendId===it[0]); const nm = p?p.name:'(product removed)'; const vn = it[4] ? ` (${it[4]})` : ''; return `<div class="flex justify-between text-xs"><span class="text-slate-700">${nm}${vn} &times; ${it[1]}</span><span class="text-slate-600">${formatCurrency(it[1]*it[2])}</span></div>`; }).join('')}</div><div class="flex justify-between text-sm font-bold text-slate-800 border-t mt-2 pt-2"><span>Total</span><span>${formatCurrency(o.order_total||0)}</span></div></div>
         </div>
         <div class="flex sm:flex-col gap-2 flex-shrink-0">
           <button onclick="convertOrderToTransaction('${o.__backendId}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1 whitespace-nowrap"><i data-lucide="arrow-right-circle" class="w-3.5 h-3.5"></i>Make Transaction</button>
@@ -759,7 +804,7 @@
   async function convertOrderToTransaction(id){
     const o = onlineOrders.find(x => x.__backendId === id); if (!o) return;
     let items; try { items = JSON.parse(o.order_items||'[]'); } catch(e){ items = []; }
-    cart = items.map(it => { const p = products.find(pr=>pr.__backendId===it[0]); return { productId:it[0], name:p?p.name:'Unknown', sku:p?(p.sku||''):'', qty:it[1], price:it[2] }; });
+    cart = items.map(it => { const p = products.find(pr=>pr.__backendId===it[0]); return { productId:it[0], name:p?p.name:'Unknown', sku:p?(p.sku||''):'', qty:it[1], price:it[2], variantName: it[4] || '' }; });
 
     // Find or create a customer from the order details (match by phone)
     let custId = null;
@@ -914,7 +959,7 @@
         </div>
         <div class="overflow-x-auto mb-8"><table class="w-full" style="font-size:10px;">
           <thead><tr style="background-color:${c3};border-bottom:2px solid ${c4}"><th class="text-left py-1.5 px-4 font-bold text-slate-700">#</th><th class="text-left py-1.5 px-4 font-bold text-slate-700">SKU</th><th class="text-left py-1.5 px-4 font-bold text-slate-700">Description</th><th class="text-center py-1.5 px-4 font-bold text-slate-700">Qty</th>${generatingDocType==='delivery_order' ? '' : '<th class="text-right py-1.5 px-4 font-bold text-slate-700">Unit Price</th><th class="text-right py-1.5 px-4 font-bold text-slate-700">Amount</th>'}</tr></thead>
-          <tbody>${items.map((item,i) => `<tr class="border-b border-slate-200 hover:bg-slate-50"><td class="py-1 px-4 text-slate-600">${i+1}</td><td class="py-1 px-4 font-mono text-xs text-slate-600">${item.sku || '-'}</td><td class="py-1 px-4"><p class="font-medium text-slate-800">${item.name}</p></td><td class="py-1 px-4 text-center text-slate-700">${item.qty}</td>${generatingDocType==='delivery_order' ? '' : `<td class="py-1 px-4 text-right text-slate-700">${formatCurrency(item.price)}</td><td class="py-1 px-4 text-right font-semibold text-slate-800">${formatCurrency(item.qty * item.price)}</td>`}</tr>`).join('')}</tbody>
+          <tbody>${items.map((item,i) => `<tr class="border-b border-slate-200 hover:bg-slate-50"><td class="py-1 px-4 text-slate-600">${i+1}</td><td class="py-1 px-4 font-mono text-xs text-slate-600">${item.sku || '-'}</td><td class="py-1 px-4"><p class="font-medium text-slate-800">${item.name}${item.variantName?" - "+item.variantName:""}</p></td><td class="py-1 px-4 text-center text-slate-700">${item.qty}</td>${generatingDocType==='delivery_order' ? '' : `<td class="py-1 px-4 text-right text-slate-700">${formatCurrency(item.price)}</td><td class="py-1 px-4 text-right font-semibold text-slate-800">${formatCurrency(item.qty * item.price)}</td>`}</tr>`).join('')}</tbody>
         </table></div>
         ${generatingDocType==='delivery_order' ? '' : `<div style="display:flex;justify-content:flex-end;margin-bottom:32px;"><div style="width:280px;background-color:#f8fafc;padding:12px;border-radius:6px;border:1px solid #cbd5e1;font-size:11px;">
           <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:#475569;">Subtotal</span><span style="font-weight:500;">${formatCurrency(txn.transaction_subtotal)}</span></div>
@@ -1181,7 +1226,7 @@
       return 0;
     });
     if (filtered.length === 0) return '<tr><td colspan="6" class="py-8 text-center text-slate-400">No products found</td></tr>';
-    return filtered.map(p => `<tr class="border-b hover:bg-slate-50 ${isLowStock(p) ? 'bg-red-50/40' : ''}"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewProductSpecification('${p.__backendId}')">${p.name}${isLowStock(p) ? ' <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 align-middle">LOW</span>' : ''}</td><td class="py-3 px-4 text-slate-500 font-mono text-xs">${p.sku || '-'}</td><td class="py-3 px-4 text-slate-500">${p.category || '-'}</td><td class="py-3 px-4 text-right font-medium">${formatCurrency(p.price)}</td><td class="py-3 px-4 text-right"><input type="number" class="w-16 border rounded px-2 py-1 text-right text-sm ${isLowStock(p) ? 'border-red-300 text-red-700 font-semibold' : ''}" value="${p.quantity || 0}" onchange="updateStock('${p.__backendId}', this.value)" /></td><td class="py-3 px-4 text-center"><button onclick="editProduct('${p.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteProduct('${p.__backendId}')" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ml-2"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></td></tr>`).join('');
+    return filtered.map(p => { const vars = getVariants(p); const hasVar = vars.length > 0; const totalStock = hasVar ? vars.reduce((s,v)=>s+(v.stock||0),0) : (p.quantity||0); const prices = hasVar ? vars.map(v=>v.price||0) : [p.price||0]; const minP = Math.min(...prices), maxP = Math.max(...prices); const priceCell = hasVar ? (minP===maxP ? formatCurrency(minP) : `${formatCurrency(minP)} – ${formatCurrency(maxP)}`) : formatCurrency(p.price); const lowVar = hasVar && totalStock <= LOW_STOCK_THRESHOLD; const isLow = hasVar ? lowVar : isLowStock(p); return `<tr class="border-b hover:bg-slate-50 ${isLow ? 'bg-red-50/40' : ''}"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewProductSpecification('${p.__backendId}')">${p.name}${hasVar ? ` <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 align-middle">${vars.length} ${(p.variant_label||'variants')}</span>` : ''}${isLow ? ' <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 align-middle">LOW</span>' : ''}</td><td class="py-3 px-4 text-slate-500 font-mono text-xs">${p.sku || '-'}</td><td class="py-3 px-4 text-slate-500">${p.category || '-'}</td><td class="py-3 px-4 text-right font-medium">${priceCell}</td><td class="py-3 px-4 text-right">${hasVar ? `<span class="text-sm ${isLow?'text-red-700 font-semibold':'text-slate-600'}">${totalStock} <span class="text-xs text-slate-400">total</span></span>` : `<input type="number" class="w-16 border rounded px-2 py-1 text-right text-sm ${isLow ? 'border-red-300 text-red-700 font-semibold' : ''}" value="${p.quantity || 0}" onchange="updateStock('${p.__backendId}', this.value)" />`}</td><td class="py-3 px-4 text-center"><button onclick="editProduct('${p.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteProduct('${p.__backendId}')" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ml-2"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></td></tr>`; }).join('');
   }
   /* ===== SIMPLE MARKUP -> HTML (shared style with catalogue) ===== */
   function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1259,6 +1304,8 @@
 
   function showProductForm(product){
     editingProduct = product || null; const p = product || {};
+    try { editingVariants = p.variants ? JSON.parse(p.variants) : []; } catch(e){ editingVariants = []; }
+    if (!Array.isArray(editingVariants)) editingVariants = [];
     const area = document.getElementById('productFormArea'); if (!area) return;
     area.innerHTML = `<div class="bg-white rounded-xl shadow-sm border p-5 mb-4"><h3 class="font-semibold text-slate-700 mb-3">${product ? 'Edit' : 'Add'} Product</h3>
       <form onsubmit="saveProduct(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1269,20 +1316,49 @@
         <div><label class="text-xs text-slate-500 block mb-1">Stock Qty</label><input id="pQty" type="number" class="w-full border rounded-lg px-3 py-2 text-sm" value="${p.quantity || 0}"></div>
         <div><label class="text-xs text-slate-500 block mb-1">Description <span class="text-slate-400">(click to format)</span></label><textarea id="pDesc" onclick="openDescEditor()" onfocus="openDescEditor()" readonly class="w-full border rounded-lg px-3 py-2 text-sm resize-none cursor-pointer bg-white hover:border-blue-400" rows="2" placeholder="Click to write a formatted description...">${p.description || ''}</textarea></div>
         <div class="sm:col-span-2 lg:col-span-3"><label class="text-xs text-slate-500 block mb-1 font-medium">Product Photo (Optional)</label><div class="flex gap-3 items-end"><div class="flex-1"><input type="url" id="pPhoto" placeholder="https://example.com/photo.jpg" class="w-full border rounded-lg px-3 py-2.5 text-sm" value="${p.product_photo || ''}"><p class="text-xs text-slate-400 mt-1">Enter image URL (HTTPS)</p></div>${p.product_photo ? `<div class="flex-shrink-0"><img src="${p.product_photo}" alt="Product" class="h-16 w-16 object-cover rounded-lg border" onerror="this.style.display='none'"></div>`:''}</div></div>
+        <div class="sm:col-span-2 lg:col-span-3 border-t pt-3 mt-1">
+          <div class="flex items-center justify-between mb-2">
+            <div><label class="text-xs font-semibold text-slate-700">Variants / Options <span class="text-slate-400 font-normal">(e.g. colors, sizes)</span></label><p class="text-[11px] text-slate-400">Optional. If added, customers pick a variant and its own price/stock is used.</p></div>
+            <span class="text-xs text-slate-400">Option label:</span>
+          </div>
+          <div class="flex items-center gap-2 mb-3"><input id="pVariantLabel" class="border rounded-lg px-3 py-1.5 text-sm w-40" placeholder="e.g. Color" value="${(p.variant_label || 'Color').replace(/"/g,'&quot;')}"><button type="button" onclick="addVariantRow()" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><i data-lucide="plus" class="w-3 h-3"></i>Add Variant</button></div>
+          <div id="variantRows"></div>
+        </div>
         <div class="sm:col-span-2 lg:col-span-3 flex gap-2 mt-2"><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold">${product ? 'Update' : 'Add'} Product</button><button type="button" onclick="cancelProductForm()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-lg text-sm font-medium">Cancel</button></div>
       </form></div>`;
+    renderVariantRows();
     lucide.createIcons();
   }
-  function cancelProductForm(){ editingProduct = null; const a = document.getElementById('productFormArea'); if (a) a.innerHTML=''; }
+  function renderVariantRows(){
+    const box = document.getElementById('variantRows'); if (!box) return;
+    if (editingVariants.length === 0){ box.innerHTML = '<p class="text-xs text-slate-400 italic">No variants — this is a single product with the price and stock above.</p>'; return; }
+    box.innerHTML = `<div class="space-y-2">${editingVariants.map((v,i)=>`
+      <div class="flex flex-wrap items-center gap-2 bg-slate-50 rounded-lg p-2">
+        <input value="${(v.name||'').replace(/"/g,'&quot;')}" oninput="updateVariant(${i},'name',this.value)" placeholder="Variant name" class="border rounded px-2 py-1.5 text-sm flex-1 min-w-[120px]">
+        <div class="flex items-center gap-1"><span class="text-xs text-slate-400">RM</span><input type="number" step="0.01" value="${v.price!=null?v.price:''}" oninput="updateVariant(${i},'price',this.value)" placeholder="Price" class="border rounded px-2 py-1.5 text-sm w-24"></div>
+        <div class="flex items-center gap-1"><span class="text-xs text-slate-400">Stock</span><input type="number" value="${v.stock!=null?v.stock:0}" oninput="updateVariant(${i},'stock',this.value)" class="border rounded px-2 py-1.5 text-sm w-20"></div>
+        <button type="button" onclick="removeVariantRow(${i})" class="text-red-400 hover:text-red-600 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+      </div>`).join('')}</div>`;
+    lucide.createIcons();
+  }
+  function addVariantRow(){ editingVariants.push({ name:'', price:parseFloat(document.getElementById('pPrice')?.value)||0, stock:0 }); renderVariantRows(); }
+  function removeVariantRow(i){ editingVariants.splice(i,1); renderVariantRows(); }
+  function updateVariant(i, field, val){
+    if (field === 'price') editingVariants[i].price = parseFloat(val)||0;
+    else if (field === 'stock') editingVariants[i].stock = parseInt(val)||0;
+    else editingVariants[i][field] = val;
+  }
+  function cancelProductForm(){ editingProduct = null; editingVariants = []; const a = document.getElementById('productFormArea'); if (a) a.innerHTML=''; }
   function editProduct(id){ const p = products.find(pr => pr.__backendId === id); if (p) showProductForm(p); }
   async function saveProduct(e){
     e.preventDefault();
     const generatedSku = editingProduct ? editingProduct.sku : generateAutoSKU();
-    const data = { type:'product', name:document.getElementById('pName').value, sku:generatedSku, category:document.getElementById('pCategory').value, price:parseFloat(document.getElementById('pPrice').value)||0, quantity:parseInt(document.getElementById('pQty').value)||0, description:document.getElementById('pDesc').value, product_photo:document.getElementById('pPhoto').value, created_at:editingProduct?.created_at || new Date().toISOString() };
+    const cleanVariants = editingVariants.filter(v => (v.name||'').trim() !== '').map(v => ({ name:v.name.trim(), price:parseFloat(v.price)||0, stock:parseInt(v.stock)||0 }));
+    const data = { type:'product', name:document.getElementById('pName').value, sku:generatedSku, category:document.getElementById('pCategory').value, price:parseFloat(document.getElementById('pPrice').value)||0, quantity:parseInt(document.getElementById('pQty').value)||0, description:document.getElementById('pDesc').value, product_photo:document.getElementById('pPhoto').value, variant_label:document.getElementById('pVariantLabel')?.value||'Color', variants: cleanVariants.length ? JSON.stringify(cleanVariants) : '', created_at:editingProduct?.created_at || new Date().toISOString() };
     let result;
     if (editingProduct) result = await window.dataSdk.update({ ...editingProduct, ...data });
     else result = await window.dataSdk.create(data);
-    if (result.isOk) { showToast(editingProduct ? 'Product updated' : 'Product added'); editingProduct = null; }
+    if (result.isOk) { showToast(editingProduct ? 'Product updated' : 'Product added'); editingProduct = null; editingVariants = []; }
     else showToast('Failed to save', 'error');
   }
   function confirmDeleteProduct(id){
@@ -1473,6 +1549,7 @@
   function clearReportFilter(){ reportDateFrom = ''; reportDateTo = ''; reportSearchQuery = ''; reportOutstandingOnly = false; renderCurrentPage(); }
   function toggleOutstandingOnly(){ reportOutstandingOnly = !reportOutstandingOnly; renderCurrentPage(); }
   function showOutstanding(){ reportOutstandingOnly = true; reportDateFrom = ''; reportDateTo = ''; reportSearchQuery = ''; navigate('reports'); }
+  function showTodaySales(){ const t = new Date().toISOString().split('T')[0]; reportDateFrom = t; reportDateTo = t; reportSearchQuery = ''; reportOutstandingOnly = false; navigate('reports'); }
   function exportReportExcel(){
     if (typeof XLSX === 'undefined') { showToast('Excel library not loaded yet', 'error'); return; }
     const filtered = getFilteredReportTxns();
