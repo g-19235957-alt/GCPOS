@@ -1147,6 +1147,80 @@
     if (filtered.length === 0) return '<tr><td colspan="6" class="py-8 text-center text-slate-400">No products found</td></tr>';
     return filtered.map(p => `<tr class="border-b hover:bg-slate-50 ${isLowStock(p) ? 'bg-red-50/40' : ''}"><td class="py-3 px-4 font-medium text-slate-800 cursor-pointer hover:text-blue-600 transition" onclick="viewProductSpecification('${p.__backendId}')">${p.name}${isLowStock(p) ? ' <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 align-middle">LOW</span>' : ''}</td><td class="py-3 px-4 text-slate-500 font-mono text-xs">${p.sku || '-'}</td><td class="py-3 px-4 text-slate-500">${p.category || '-'}</td><td class="py-3 px-4 text-right font-medium">${formatCurrency(p.price)}</td><td class="py-3 px-4 text-right"><input type="number" class="w-16 border rounded px-2 py-1 text-right text-sm ${isLowStock(p) ? 'border-red-300 text-red-700 font-semibold' : ''}" value="${p.quantity || 0}" onchange="updateStock('${p.__backendId}', this.value)" /></td><td class="py-3 px-4 text-center"><button onclick="editProduct('${p.__backendId}')" class="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition"><i data-lucide="edit" class="w-3 h-3"></i>Edit</button><button onclick="confirmDeleteProduct('${p.__backendId}')" class="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ml-2"><i data-lucide="trash-2" class="w-3 h-3"></i>Delete</button></td></tr>`).join('');
   }
+  /* ===== SIMPLE MARKUP -> HTML (shared style with catalogue) ===== */
+  function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function renderMarkup(text){
+    if (!text) return '';
+    const escaped = escapeHtml(text);
+    const lines = escaped.split('\n');
+    let html = '', inList = false;
+    const inline = s => s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*]+)\*/g,'<em>$1</em>');
+    for (let raw of lines){
+      const line = raw.trim();
+      if (/^[-*]\s+/.test(line)){
+        if (!inList){ html += '<ul style="list-style:disc;margin:4px 0;padding-left:20px;">'; inList = true; }
+        html += '<li>' + inline(line.replace(/^[-*]\s+/,'')) + '</li>';
+      } else {
+        if (inList){ html += '</ul>'; inList = false; }
+        if (line === '') html += '<div style="height:6px;"></div>';
+        else html += '<p style="margin:2px 0;">' + inline(line) + '</p>';
+      }
+    }
+    if (inList) html += '</ul>';
+    return html;
+  }
+
+  /* ===== DESCRIPTION EDITOR DIALOG ===== */
+  function openDescEditor(){
+    const current = document.getElementById('pDesc').value || '';
+    const overlay = document.createElement('div');
+    overlay.id = 'descEditorOverlay';
+    overlay.className = 'fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl flex flex-col" style="max-height:90vh;">
+        <div class="flex items-center justify-between p-5 border-b">
+          <h3 class="text-lg font-bold text-slate-800">Edit Description</h3>
+          <button onclick="closeDescEditor()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+        <div class="p-5 overflow-y-auto">
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-slate-600">
+            <p class="font-semibold text-slate-700 mb-1">Formatting guide</p>
+            <p>• Start a line with <code class="bg-white px-1 rounded">-</code> for a bullet point</p>
+            <p>• Wrap text in <code class="bg-white px-1 rounded">**double stars**</code> for <strong>bold</strong></p>
+            <p>• Leave a blank line to start a new paragraph</p>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs font-semibold text-slate-600 block mb-1">Write here</label>
+              <textarea id="descEditorInput" oninput="updateDescPreview()" class="w-full border rounded-lg px-3 py-2.5 text-sm resize-none font-mono" rows="10" placeholder="- First feature&#10;- Second feature&#10;&#10;**Important:** extra info">${current.replace(/</g,'&lt;')}</textarea>
+            </div>
+            <div>
+              <label class="text-xs font-semibold text-slate-600 block mb-1">Preview</label>
+              <div id="descEditorPreview" class="border rounded-lg px-3 py-2.5 text-sm bg-slate-50 overflow-y-auto" style="height:228px;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-2 p-5 border-t">
+          <button onclick="saveDescEditor()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2.5 text-sm font-semibold">Save Description</button>
+          <button onclick="closeDescEditor()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg py-2.5 px-5 text-sm font-medium">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    lucide.createIcons();
+    updateDescPreview();
+  }
+  function updateDescPreview(){
+    const txt = document.getElementById('descEditorInput').value;
+    document.getElementById('descEditorPreview').innerHTML = renderMarkup(txt) || '<span class="text-slate-400 italic">Preview will appear here…</span>';
+  }
+  function saveDescEditor(){
+    const txt = document.getElementById('descEditorInput').value;
+    const target = document.getElementById('pDesc');
+    if (target) target.value = txt;
+    closeDescEditor();
+  }
+  function closeDescEditor(){ const o = document.getElementById('descEditorOverlay'); if (o) o.remove(); }
+
   function showProductForm(product){
     editingProduct = product || null; const p = product || {};
     const area = document.getElementById('productFormArea'); if (!area) return;
@@ -1157,7 +1231,7 @@
         <div><label class="text-xs text-slate-500 block mb-1">Category</label><input id="pCategory" class="w-full border rounded-lg px-3 py-2 text-sm" value="${p.category || ''}"></div>
         <div><label class="text-xs text-slate-500 block mb-1">Price *</label><input id="pPrice" type="number" step="0.01" required class="w-full border rounded-lg px-3 py-2 text-sm" value="${p.price || ''}"></div>
         <div><label class="text-xs text-slate-500 block mb-1">Stock Qty</label><input id="pQty" type="number" class="w-full border rounded-lg px-3 py-2 text-sm" value="${p.quantity || 0}"></div>
-        <div><label class="text-xs text-slate-500 block mb-1">Description</label><textarea id="pDesc" class="w-full border rounded-lg px-3 py-2 text-sm resize-none" rows="2">${p.description || ''}</textarea></div>
+        <div><label class="text-xs text-slate-500 block mb-1">Description <span class="text-slate-400">(click to format)</span></label><textarea id="pDesc" onclick="openDescEditor()" onfocus="openDescEditor()" readonly class="w-full border rounded-lg px-3 py-2 text-sm resize-none cursor-pointer bg-white hover:border-blue-400" rows="2" placeholder="Click to write a formatted description...">${p.description || ''}</textarea></div>
         <div class="sm:col-span-2 lg:col-span-3"><label class="text-xs text-slate-500 block mb-1 font-medium">Product Photo (Optional)</label><div class="flex gap-3 items-end"><div class="flex-1"><input type="url" id="pPhoto" placeholder="https://example.com/photo.jpg" class="w-full border rounded-lg px-3 py-2.5 text-sm" value="${p.product_photo || ''}"><p class="text-xs text-slate-400 mt-1">Enter image URL (HTTPS)</p></div>${p.product_photo ? `<div class="flex-shrink-0"><img src="${p.product_photo}" alt="Product" class="h-16 w-16 object-cover rounded-lg border" onerror="this.style.display='none'"></div>`:''}</div></div>
         <div class="sm:col-span-2 lg:col-span-3 flex gap-2 mt-2"><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold">${product ? 'Update' : 'Add'} Product</button><button type="button" onclick="cancelProductForm()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-lg text-sm font-medium">Cancel</button></div>
       </form></div>`;
@@ -1245,7 +1319,7 @@
     const prod = viewingProduct; const comp = getCompany();
     container.innerHTML = `<div class="mb-4 no-print"><button onclick="navigate('products')" class="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 mb-4"><i data-lucide="arrow-left" class="w-4 h-4"></i>Back to Products</button><div class="flex gap-2 flex-wrap"><button onclick="printProductSpec()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><i data-lucide="printer" class="w-4 h-4"></i>Print</button><button onclick="downloadProductSpecPDF()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><i data-lucide="download" class="w-4 h-4"></i>Save PDF</button></div></div>
       <div class="bg-white rounded-xl shadow-lg border-4 p-6 md:p-10 max-w-4xl mx-auto" id="specDocument" style="border-color:#2563eb"><div class="flex items-start justify-between gap-6 mb-8 pb-6" style="border-bottom:3px solid #2563eb;"><div style="flex:1;min-width:0;">${comp.company_logo ? `<img src="${comp.company_logo}" alt="Logo" style="width:40px;height:40px;object-fit:contain;margin-bottom:8px;display:block;" onerror="this.style.display='none'">`:''}<h2 class="text-lg font-bold text-slate-900">${comp.company_name || 'Your Company'}</h2><p style="font-size:9px;margin:4px 0 0 0;" class="text-slate-500 whitespace-pre-line">${comp.company_address || ''}</p>${comp.company_phone ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">Tel: ${comp.company_phone}</p>`:''}${comp.company_email ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">${comp.company_email}</p>`:''}${comp.company_reg ? `<p style="font-size:9px;margin:2px 0 0 0;" class="text-slate-500">Reg: ${comp.company_reg}</p>`:''}</div><div class="text-right" style="flex:0 0 auto;white-space:nowrap;"><h1 class="text-4xl font-bold" style="color:#1e40af;margin:0 0 8px 0;line-height:1.2;">ITEM SPECIFICATION</h1><p class="text-sm text-slate-500" style="margin:0;">Date: ${new Date().toLocaleDateString('en-MY', { year:'numeric', month:'long', day:'numeric' })}</p></div></div>
-        <div class="mb-8"><div style="display:flex;gap:24px;align-items:flex-start;margin-bottom:24px;"><div style="flex:1;min-width:0;"><div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Product Name</p><h3 class="text-3xl font-bold text-slate-900">${prod.name}</h3></div><div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">SKU</p><p class="text-lg font-mono font-bold text-slate-700">${prod.sku || 'N/A'}</p></div></div>${prod.product_photo ? `<div style="flex:0 0 auto;"><img src="${prod.product_photo}" alt="${prod.name}" style="width:300px;height:300px;object-fit:contain;border:2px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" onerror="this.style.display='none'"></div>`:''}</div>${prod.description ? `<div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Description</p><div class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap" style="background:#f8fafc;padding:12px;border-left:4px solid #2563eb;border-radius:4px;">${prod.description}</div></div>`:''}</div>
+        <div class="mb-8"><div style="display:flex;gap:24px;align-items:flex-start;margin-bottom:24px;"><div style="flex:1;min-width:0;"><div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Product Name</p><h3 class="text-3xl font-bold text-slate-900">${prod.name}</h3></div><div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">SKU</p><p class="text-lg font-mono font-bold text-slate-700">${prod.sku || 'N/A'}</p></div></div>${prod.product_photo ? `<div style="flex:0 0 auto;"><img src="${prod.product_photo}" alt="${prod.name}" style="width:300px;height:300px;object-fit:contain;border:2px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff;" onerror="this.style.display='none'"></div>`:''}</div>${prod.description ? `<div class="mb-6"><p class="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-2">Description</p><div class="text-sm text-slate-700 leading-relaxed " style="background:#f8fafc;padding:12px;border-left:4px solid #2563eb;border-radius:4px;">${renderMarkup(prod.description)}</div></div>`:''}</div>
         <div class="border-t pt-6 mt-8 space-y-2 text-center"><p class="text-xs text-slate-500 italic">This is a computer generated document. No signature required.</p><p class="text-xs text-slate-400">${comp.company_name || ''} ${comp.company_reg ? '&middot; Reg: ' + comp.company_reg : ''}</p></div></div>`;
     lucide.createIcons();
   }
