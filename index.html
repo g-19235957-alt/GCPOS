@@ -737,7 +737,7 @@
       <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap"><p class="font-semibold text-slate-800">${o.order_name||'(no name)'}</p><span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-${statusColor}-100 text-${statusColor}-700">${statusLabel}</span></div>
-          <p class="text-xs text-slate-500 mt-0.5">${date}</p>
+          <p class="text-xs text-slate-500 mt-0.5">${date}${o.order_ref?` &middot; <span class="font-mono">${o.order_ref}</span>`:''}</p>
           <div class="text-xs text-slate-600 mt-2 space-y-0.5">
             ${o.order_organization?`<p><span class="text-slate-400">Org:</span> ${o.order_organization}</p>`:''}
             ${o.order_role?`<p><span class="text-slate-400">Role:</span> ${o.order_role}</p>`:''}
@@ -756,19 +756,42 @@
       </div>
     </div>`;
   }
-  function convertOrderToTransaction(id){
+  async function convertOrderToTransaction(id){
     const o = onlineOrders.find(x => x.__backendId === id); if (!o) return;
     let items; try { items = JSON.parse(o.order_items||'[]'); } catch(e){ items = []; }
     cart = items.map(it => { const p = products.find(pr=>pr.__backendId===it[0]); return { productId:it[0], name:p?p.name:'Unknown', sku:p?(p.sku||''):'', qty:it[1], price:it[2] }; });
-    selectedCustomer = null;
+
+    // Find or create a customer from the order details (match by phone)
+    let custId = null;
+    const phone = (o.order_phone||'').trim();
+    let existing = phone ? customers.find(c => (c.customer_phone||'').trim() === phone) : null;
+    if (existing) { custId = existing.__backendId; }
+    else if (o.order_name) {
+      const newCust = {
+        type:'customer',
+        customer_name: o.order_name,
+        customer_company: o.order_organization || '',
+        customer_email: '',
+        customer_phone: phone,
+        customer_address: o.order_address || '',
+        created_at: new Date().toISOString()
+      };
+      const res = await window.dataSdk.create(newCust);
+      if (res && res.isOk){
+        const created = customers.find(c => c.customer_name === o.order_name && (c.customer_phone||'').trim() === phone);
+        if (created) custId = created.__backendId;
+        showToast('Customer card created from order');
+      }
+    }
+
+    selectedCustomer = custId;
     window.editingTransactionId = null;
     window.currentTaxPercent = 0;
     window.transactionDate = null;
     window.editingPaymentMethod = o.order_payment || 'cash';
     window.editingDeliveryMethod = 'shipping';
-    const contact = [o.order_name && ('Name: '+o.order_name), o.order_organization && ('Org: '+o.order_organization), o.order_role && ('Role: '+o.order_role), o.order_phone && ('Phone: '+o.order_phone), o.order_address && ('Address: '+o.order_address), o.order_notes && ('Notes: '+o.order_notes)].filter(Boolean).join(' | ');
-    window.editingNotes = 'ONLINE ORDER — ' + contact;
-    // mark the order converted (best effort)
+    const extra = [o.order_role && ('Role: '+o.order_role), o.order_ref && ('Order Ref: '+o.order_ref), o.order_notes && ('Notes: '+o.order_notes)].filter(Boolean).join(' | ');
+    window.editingNotes = 'ONLINE ORDER' + (extra ? ' — ' + extra : '');
     window.dataSdk.update({ ...o, order_status:'converted' }, true);
     currentPage = 'pos'; renderCurrentPage(); window.scrollTo(0,0);
     showToast('Order loaded into New Transaction — review and save');
