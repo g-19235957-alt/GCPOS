@@ -1204,8 +1204,13 @@
   async function updateStock(productId, newQty){
     const product = products.find(p => p.__backendId === productId); if (!product) return;
     const qty = Math.max(0, parseInt(newQty) || 0);
-    const result = await window.dataSdk.update({ ...product, quantity:qty });
-    showToast(result.isOk ? 'Stock updated' : 'Failed to update stock', result.isOk ? 'success' : 'error');
+    const merged = { ...product, quantity:qty };
+    const cache = window.dataSdk.cache;
+    const i = cache.findIndex(r => r.__backendId === productId);
+    if (i >= 0) cache[i] = merged;
+    window.dataSdk.update(merged, true).then(r => {
+      if (!r.isOk) showToast('Stock save failed — please retry', 'error');
+    });
   }
   function updateProductSearch(query){ productSearchQuery = query.toLowerCase(); renderCurrentPage(); }
   function sortProducts(field){ if (productSortBy === field) productSortOrder = productSortOrder === 'asc' ? 'desc' : 'asc'; else { productSortBy = field; productSortOrder = 'asc'; } renderCurrentPage(); }
@@ -1367,11 +1372,43 @@
     const generatedSku = editingProduct ? editingProduct.sku : generateAutoSKU();
     const cleanVariants = editingVariants.filter(v => (v.name||'').trim() !== '').map(v => ({ name:v.name.trim(), price:parseFloat(v.price)||0, stock:parseInt(v.stock)||0 }));
     const data = { type:'product', name:document.getElementById('pName').value, sku:generatedSku, category:document.getElementById('pCategory').value, price:parseFloat(document.getElementById('pPrice').value)||0, quantity:parseInt(document.getElementById('pQty').value)||0, description:document.getElementById('pDesc').value, product_photo:document.getElementById('pPhoto').value, variant_label:document.getElementById('pVariantLabel')?.value||'Color', variants: cleanVariants.length ? JSON.stringify(cleanVariants) : '', created_at:editingProduct?.created_at || new Date().toISOString() };
-    let result;
-    if (editingProduct) result = await window.dataSdk.update({ ...editingProduct, ...data });
-    else result = await window.dataSdk.create(data);
-    if (result.isOk) { showToast(editingProduct ? 'Product updated' : 'Product added'); editingProduct = null; editingVariants = []; closeProductForm(); }
-    else showToast('Failed to save', 'error');
+    const wasEditing = editingProduct;
+
+    if (wasEditing){
+      // Optimistic update: change local cache now, render instantly, save in background
+      const merged = { ...wasEditing, ...data };
+      const cache = window.dataSdk.cache;
+      const i = cache.findIndex(r => r.__backendId === wasEditing.__backendId);
+      if (i >= 0) cache[i] = merged;
+      editingProduct = null; editingVariants = [];
+      closeProductForm();
+      window.dataSdk.pushCacheToUI();
+      showToast('Product updated');
+      window.dataSdk.update(merged, true).then(r => {
+        if (!r.isOk) showToast('Save failed — please edit and try again', 'error');
+      });
+    } else {
+      // New product: optimistic add with a temporary id, reconcile on server response
+      const tempId = 'temp_' + Date.now();
+      const optimistic = { ...data, __backendId: tempId };
+      window.dataSdk.cache.push(optimistic);
+      editingProduct = null; editingVariants = [];
+      closeProductForm();
+      window.dataSdk.pushCacheToUI();
+      showToast('Product added');
+      window.dataSdk.create(data, true).then(r => {
+        const cache = window.dataSdk.cache;
+        const idx = cache.findIndex(x => x.__backendId === tempId);
+        if (r.isOk && r.record){
+          if (idx >= 0) cache[idx] = r.record; // replace temp with real record
+          window.dataSdk.pushCacheToUI();
+        } else {
+          if (idx >= 0) cache.splice(idx, 1); // roll back on failure
+          window.dataSdk.pushCacheToUI();
+          showToast('Save failed — please add it again', 'error');
+        }
+      });
+    }
   }
   function confirmDeleteProduct(id){
     deletingProductId = id;
