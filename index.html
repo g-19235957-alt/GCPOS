@@ -1429,7 +1429,7 @@
         </div>
         <div class="sm:col-span-2 lg:col-span-3 flex gap-2 mt-2"><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold">${product ? 'Update' : 'Add'} Product</button><button type="button" onclick="closeProductForm()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-lg text-sm font-medium">Cancel</button></div>
       </form></div>`;
-    overlay.onclick = () => closeProductForm();
+    overlay.onclick = null;
     document.body.appendChild(overlay);
     document.body.style.overflow = 'hidden';
     renderVariantRows();
@@ -1594,7 +1594,7 @@
     lucide.createIcons();
   }
   function closeSpecDialog(){ const o = document.getElementById('specOverlay'); if (o) o.remove(); document.body.style.overflow=''; }
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ closeSpecDialog(); closeProductForm(); closeVariantPicker(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ closeSpecDialog(); closeVariantPicker(); } });
   function renderProductSpecification(container){
     if (!viewingProduct) { navigate('products'); return; }
     container.innerHTML = `<div class="mb-4 no-print"><button onclick="navigate('products')" class="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 mb-4"><i data-lucide="arrow-left" class="w-4 h-4"></i>Back to Products</button></div><div class="max-w-4xl mx-auto rounded-xl shadow-lg border-4" style="border-color:#2563eb">${specDocumentHtml(viewingProduct)}</div>`;
