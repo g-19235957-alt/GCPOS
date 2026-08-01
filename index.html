@@ -1926,6 +1926,8 @@
         <div><label class="text-xs text-slate-500 block mb-1 font-medium">Registration No.</label><input id="compReg" class="w-full border rounded-lg px-4 py-2.5 text-sm" value="${c.company_reg || ''}"></div>
         <div><label class="text-xs text-slate-500 block mb-1 font-medium">Logo URL (https://)</label><input id="compLogo" type="url" class="w-full border rounded-lg px-4 py-2.5 text-sm" value="${c.company_logo || ''}" placeholder="https://example.com/logo.png"></div>
         ${c.company_logo ? `<div><img src="${c.company_logo}" alt="Logo preview" class="h-16 object-contain border rounded p-2" onerror="this.style.display='none'"></div>`:''}
+        <div><label class="text-xs text-slate-500 block mb-1 font-medium">Brand Logos <span class="text-slate-400">(shown on the Catalogue as "Brands We Carry" — one image URL per line)</span></label><textarea id="compBrands" class="w-full border rounded-lg px-4 py-2.5 text-sm resize-none font-mono text-xs" rows="4" placeholder="https://example.com/hp-logo.png&#10;https://example.com/canon-logo.png">${c.company_brands || ''}</textarea></div>
+        ${c.company_brands ? `<div class="flex flex-wrap gap-2">${(c.company_brands||'').split(/[\n,]+/).map(s=>s.trim()).filter(s=>/^https:\/\//i.test(s)).map(u=>`<div class="bg-slate-50 border rounded-lg px-3 py-1.5"><img src="${u}" class="h-7 object-contain" onerror="this.parentElement.style.display='none'"></div>`).join('')}</div>`:''}
         <button type="submit" id="saveCompanyBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold">Save Company Profile</button>
       </form></div>
       <div class="bg-white rounded-xl shadow-sm border p-6 max-w-2xl mt-6">
@@ -1954,7 +1956,7 @@
   async function saveCompany(e){
     e.preventDefault();
     const btn = document.getElementById('saveCompanyBtn'); btn.disabled = true; btn.textContent = 'Saving...';
-    const data = { type:'company', company_name:document.getElementById('compName').value, company_address:document.getElementById('compAddr').value, company_phone:document.getElementById('compPhone').value, company_email:document.getElementById('compEmail').value, company_reg:document.getElementById('compReg').value, company_logo:document.getElementById('compLogo').value, created_at:companyInfo?.created_at || new Date().toISOString() };
+    const data = { type:'company', company_name:document.getElementById('compName').value, company_address:document.getElementById('compAddr').value, company_phone:document.getElementById('compPhone').value, company_email:document.getElementById('compEmail').value, company_reg:document.getElementById('compReg').value, company_logo:document.getElementById('compLogo').value, company_brands:document.getElementById('compBrands')?.value || '', created_at:companyInfo?.created_at || new Date().toISOString() };
     let result;
     if (companyInfo) result = await window.dataSdk.update({ ...companyInfo, ...data });
     else result = await window.dataSdk.create(data);
