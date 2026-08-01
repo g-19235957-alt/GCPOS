@@ -136,6 +136,7 @@
   <script>
   /* ===== GOOGLE SHEETS STORAGE ADAPTER (replaces dataSdk) ===== */
   const SHEETS_URL_KEY = 'cloudpos_sheets_url';
+  const POS_CACHE_KEY = 'cloudpos_data_cache_v1';
   window.sheetsStore = {
     url: null, handler: null, cache: [],
     getUrl() { return this.url || localStorage.getItem(SHEETS_URL_KEY) || null; },
@@ -143,8 +144,22 @@
     async init(handler) {
       this.handler = handler; this.url = this.getUrl();
       if (!this.url) return { isOk: false, needsSetup: true };
+      // Instant open: render immediately from the last saved copy, refresh in background
+      let hadCache = false;
+      try {
+        const saved = JSON.parse(localStorage.getItem(POS_CACHE_KEY) || 'null');
+        if (saved && Array.isArray(saved.data) && saved.data.length) { this.cache = saved.data; hadCache = true; }
+      } catch (e) {}
+      if (hadCache) {
+        if (this.handler && this.handler.onDataChanged) this.handler.onDataChanged(this.cache);
+        this.refresh(); // background — fresh data replaces the cached copy when it arrives
+        return { isOk: true };
+      }
       const ok = await this.refresh();
       return { isOk: ok };
+    },
+    _persist() {
+      try { localStorage.setItem(POS_CACHE_KEY, JSON.stringify({ data: this.cache, t: Date.now() })); } catch (e) {}
     },
     async refresh() {
       try {
@@ -152,6 +167,7 @@
         const json = await res.json();
         if (json.ok) {
           this.cache = json.data || [];
+          this._persist();
           if (this.handler && this.handler.onDataChanged) this.handler.onDataChanged(this.cache);
           return true;
         }
@@ -178,7 +194,7 @@
       try { const j = await this._post({ action:'delete', id: record.__backendId }); if (j.ok){ if (silent){ this.cache = this.cache.filter(r => r.__backendId !== record.__backendId); } else { await this.refresh(); } return {isOk:true}; } return {isOk:false}; }
       catch(e){ console.error(e); return {isOk:false}; }
     },
-    pushCacheToUI(){ if (this.handler && this.handler.onDataChanged) this.handler.onDataChanged(this.cache); }
+    pushCacheToUI(){ this._persist(); if (this.handler && this.handler.onDataChanged) this.handler.onDataChanged(this.cache); }
   };
   window.dataSdk = window.sheetsStore;
 
