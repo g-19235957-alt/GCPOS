@@ -159,9 +159,13 @@
       return { isOk: ok };
     },
     _persist() {
-      try { localStorage.setItem(POS_CACHE_KEY, JSON.stringify({ data: this.cache, t: Date.now() })); } catch (e) {}
+      try {
+        const clean = (this.cache || []).filter(r => !String(r.__backendId || '').startsWith('tmp'));
+        localStorage.setItem(POS_CACHE_KEY, JSON.stringify({ data: clean, t: Date.now() }));
+      } catch (e) {}
     },
     async refresh() {
+      if (window._pendingSyncs > 0) return true; // a save is still syncing — skip this refresh so it can't clash
       try {
         const res = await fetch(this.getUrl(), { method: 'GET' });
         const json = await res.json();
@@ -191,10 +195,25 @@
       catch(e){ console.error(e); return {isOk:false}; }
     },
     async delete(record, silent) {
-      try { const j = await this._post({ action:'delete', id: record.__backendId }); if (j.ok){ if (silent){ this.cache = this.cache.filter(r => r.__backendId !== record.__backendId); } else { await this.refresh(); } return {isOk:true}; } return {isOk:false}; }
+      try {
+        const j = await this._post({ action:'delete', id: record.__backendId });
+        const gone = j.ok || j.error === 'not found'; // 'not found' = already deleted; treat as success and clean up locally
+        if (gone){
+          this.cache = this.cache.filter(r => r.__backendId !== record.__backendId);
+          if (silent){ this._persist(); } else { this.pushCacheToUI(); }
+          return { isOk: true };
+        }
+        return { isOk: false };
+      }
       catch(e){ console.error(e); return {isOk:false}; }
     },
-    pushCacheToUI(){ this._persist(); if (this.handler && this.handler.onDataChanged) this.handler.onDataChanged(this.cache); }
+    pushCacheToUI(){
+      const seen = new Map();
+      (this.cache || []).forEach(r => { if (r && r.__backendId) seen.set(r.__backendId, r); });
+      this.cache = Array.from(seen.values());
+      this._persist();
+      if (this.handler && this.handler.onDataChanged) this.handler.onDataChanged(this.cache);
+    }
   };
   window.dataSdk = window.sheetsStore;
 
@@ -364,9 +383,11 @@
     window.dataSdk.cache = window.dataSdk.cache.filter(r => r.__backendId !== id);
   }
   function syncInBackground(writeFns){
+    window._pendingSyncs = (window._pendingSyncs || 0) + 1;
     Promise.all(writeFns.map(f => f())).then(results => {
       if (results.some(r => !r || !r.isOk)) { showToast('Sync to Google Sheets failed — refreshing', 'error'); forceRefresh(); }
-    }).catch(() => { showToast('Sync to Google Sheets failed — refreshing', 'error'); forceRefresh(); });
+    }).catch(() => { showToast('Sync to Google Sheets failed — refreshing', 'error'); forceRefresh(); })
+      .finally(() => { window._pendingSyncs = Math.max(0, (window._pendingSyncs || 1) - 1); });
   }
   function formatCurrency(n) { return new Intl.NumberFormat('ms-MY', { style:'currency', currency:'MYR' }).format(n || 0); }
   function roundToNearest5Cents(amount) {
@@ -911,7 +932,7 @@
       bgWrites.push(async () => {
         const r = await window.dataSdk.create(data, true);
         cacheRemove(tempId);
-        window.dataSdk.pushCacheToUI();
+        window.dataSdk.pushCacheToUI(); // pushCacheToUI dedupes by id, so no double copies can remain
         return r;
       });
       // Aggregate deductions per product (handles base + multiple variants)
