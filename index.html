@@ -1774,8 +1774,23 @@
     lucide.createIcons();
   }
   function closeProductForm(){ const o = document.getElementById('productFormOverlay'); if (o) o.remove(); document.body.style.overflow=''; }
+  function syncStockFromVariants(){
+    const qtyInput = document.getElementById('pQty'); if (!qtyInput) return;
+    if (editingVariants.length > 0){
+      const total = editingVariants.reduce((s,v)=>s+(parseInt(v.stock)||0),0);
+      qtyInput.value = total;
+      qtyInput.readOnly = true;
+      qtyInput.classList.add('bg-slate-50','text-slate-500');
+      qtyInput.title = 'Auto-calculated from variant stock';
+    } else {
+      qtyInput.readOnly = false;
+      qtyInput.classList.remove('bg-slate-50','text-slate-500');
+      qtyInput.title = '';
+    }
+  }
   function renderVariantRows(){
     const box = document.getElementById('variantRows'); if (!box) return;
+    syncStockFromVariants();
     if (editingVariants.length === 0){ box.innerHTML = '<p class="text-xs text-slate-400 italic">No variants — this is a single product with the price and stock above.</p>'; return; }
     box.innerHTML = `<div class="space-y-2">${editingVariants.map((v,i)=>`
       <div class="flex flex-wrap items-center gap-2 bg-slate-50 rounded-lg p-2">
@@ -1790,7 +1805,7 @@
   function removeVariantRow(i){ editingVariants.splice(i,1); renderVariantRows(); }
   function updateVariant(i, field, val){
     if (field === 'price') editingVariants[i].price = parseFloat(val)||0;
-    else if (field === 'stock') editingVariants[i].stock = parseInt(val)||0;
+    else if (field === 'stock') { editingVariants[i].stock = parseInt(val)||0; syncStockFromVariants(); }
     else editingVariants[i][field] = val;
   }
   function cancelProductForm(){ editingProduct = null; editingVariants = []; closeProductForm(); }
@@ -1799,7 +1814,8 @@
     e.preventDefault();
     const generatedSku = editingProduct ? editingProduct.sku : generateAutoSKU();
     const cleanVariants = editingVariants.filter(v => (v.name||'').trim() !== '').map(v => ({ name:v.name.trim(), price:parseFloat(v.price)||0, stock:parseInt(v.stock)||0 }));
-    const data = { type:'product', name:document.getElementById('pName').value, sku:generatedSku, category:document.getElementById('pCategory').value, price:parseFloat(document.getElementById('pPrice').value)||0, promo_price:parseFloat(document.getElementById('pPromo')?.value)||'', quantity:parseInt(document.getElementById('pQty').value)||0, description:document.getElementById('pDesc').value, product_photo:document.getElementById('pPhoto').value, variant_label:document.getElementById('pVariantLabel')?.value||'Color', variants: cleanVariants.length ? JSON.stringify(cleanVariants) : '', created_at:editingProduct?.created_at || new Date().toISOString() };
+    const finalQty = cleanVariants.length ? cleanVariants.reduce((s,v)=>s+(v.stock||0),0) : (parseInt(document.getElementById('pQty').value)||0);
+    const data = { type:'product', name:document.getElementById('pName').value, sku:generatedSku, category:document.getElementById('pCategory').value, price:parseFloat(document.getElementById('pPrice').value)||0, promo_price:parseFloat(document.getElementById('pPromo')?.value)||'', quantity:finalQty, description:document.getElementById('pDesc').value, product_photo:document.getElementById('pPhoto').value, variant_label:document.getElementById('pVariantLabel')?.value||'Color', variants: cleanVariants.length ? JSON.stringify(cleanVariants) : '', created_at:editingProduct?.created_at || new Date().toISOString() };
     const wasEditing = editingProduct;
 
     if (wasEditing){
